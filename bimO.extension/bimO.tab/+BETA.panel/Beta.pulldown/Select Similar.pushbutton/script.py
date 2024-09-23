@@ -1,5 +1,6 @@
 #this script prompt the user to select a revit element then it will select all the elements that are similar to the selected element specific to the element type
 #using pyrevit's built in SelectSimilar method
+# Work in Progress
 import Autodesk.Revit.DB as DB
 import pyrevit
 from pyrevit import revit, DB
