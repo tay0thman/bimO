@@ -1,0 +1,14 @@
+tooltip:
+
+  en_us: Detect a list of overridden dimensions in the active view or the entire project, provides an output summary and a list of the dimensions.
+
+title:
+
+  en_us: >-
+    Find Dimension
+  
+    Overrides
+authors:
+  - 'Tay Othman'
+
+min_revit_version: 2020

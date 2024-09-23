@@ -1,0 +1,14 @@
+tooltip:
+
+  en_us: Select attached walls of a specific wall type
+
+title:
+
+  en_us: >-
+    Select Attached
+  
+    Walls by Type
+authors:
+  - 'Tay Othman'
+
+min_revit_version: 2023
