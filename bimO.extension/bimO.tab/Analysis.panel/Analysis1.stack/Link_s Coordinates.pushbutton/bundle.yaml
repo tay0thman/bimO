@@ -1,0 +1,14 @@
+tooltip:
+
+  en_us: Find and Report Coordinates of the Selected Revit Link
+
+title:
+
+  en_us: >-
+    Find Link's
+  
+    Coordinates
+authors:
+  - 'Tay Othman'
+
+min_revit_version: 2020

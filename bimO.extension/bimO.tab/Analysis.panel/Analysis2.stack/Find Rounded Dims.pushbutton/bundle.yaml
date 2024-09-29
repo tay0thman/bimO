@@ -1,0 +1,13 @@
+tooltip:
+
+  en_us: Detect a list of rounded dimensions and report the amound of deviation
+title:
+
+  en_us: >-
+    Find Rounded 
+    Dims
+    
+authors:
+  - 'Tay Othman'
+
+min_revit_version: 2020

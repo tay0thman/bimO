@@ -1,0 +1,13 @@
+tooltip:
+
+  en_us: Detect and fix abbreviations in the drawing set, to match a format without intermediate periods (ex. UON. instead of U.O.N.)
+
+title:
+
+  en_us: >-
+    Fix Abbreviations
+  
+authors:
+  - 'Tay Othman'
+
+min_revit_version: 2020
