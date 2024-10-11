@@ -1,4 +1,9 @@
 # -*- coding: utf-8 -*-
+
+# Read Me, you can download a test model from the following link:
+# https://drive.google.com/file/d/1xt7IVmCh2_5MIVXrXWPPFJ50glG1RAEK/view?usp=sharing
+
+
 #______________________________________________Imports
 
 #General Imports
@@ -156,16 +161,16 @@ def check_model_extents(doc, output):
     output.add_style('warn {color:orange; font-weight:bold;}')
     output.add_style('good {color:green; font-weight:bold;}')
     output.add_style('cover {color:black; font-size:24pt; font-weight:bold;}')
-    output.add_style('header {color:black; font-size:18pt;}')
+    output.add_style('header {color:black; font-size:15pt;}')
     stringseperator = "_____________________________________________________________________________________________"
-    stringnewline = ""
     TestScore = 0
     extentdistance = 52800 #Linear Feet
     #__________________________________________check the distnaces of base and survey points
-    output.print_html('<cover>______:satellite_antenna:__10-Mile Radar___________</cover>')
+    output.print_html('<cover>________:satellite_antenna:__10-Mile Radar___________</cover>')
     print(stringseperator)
     print("")
     output.print_html('<header>Checking model placement and coordinates</header>')
+    print(stringseperator)
     intOrig = (0,0,0)
     basept, survpt, intOrig = get_project_base_and_survey_points(doc)
     surveydistance = calculate_distance(survpt, intOrig)
@@ -238,7 +243,7 @@ def check_model_extents(doc, output):
             for y in x:
                 print(output.linkify(y.Id)+ str(y.Name)+ " - Is part of design option - "+ str(y.DesignOption.Name) )
     else:
-        output.print_html('<good>OK............Design Option Objects are located less than 10 miles away from the Internal Origin.</good>')
+        output.print_html('<good>OK............No object in any design option is located more than 10 miles away from the Internal Origin.</good>')
         TestScore += 1
     #__________________________________________Check Test Score
     if TestScore >= 2:
@@ -259,9 +264,9 @@ def check_model_extents(doc, output):
     # print(bbox.Min, cleanbbox.Min)
     if len(badcads) > 0 or len(badrvts) > 0:
         for x in badcads:
-            print(output.linkify(x.Id)+"__" + str(x.Name) + str(x.Category.Name))
+            print(output.linkify(x.Id)+"__" + str(x.Name) + '  ' + str(x.Category.Name))
         for x in badrvts:
-            print(output.linkify(x.Id)+"__" + str(x.Name) + str(x.Category.Name))
+            print(output.linkify(x.Id)+"__" + str(x.Name) + '  ' + str(x.Category.Name))
     else:
         output.print_html('<good>OK............All CAD and RVT Links are located less than 10 miles away from the Internal Origin.</good>')
         TestScore += 1
@@ -291,18 +296,20 @@ def check_model_extents(doc, output):
 
 class ModelChecker(PreflightTestCase):
     """
-    Revit model quality check
-    The Model Checker test case checks extents of the Revit model:
-        Positioning model extents beyond 10 miles from the project’s internal origin can cause issues with 
-        accuracy, tolerance, performance, and viewport display.
+    Checks the extents of all elements in the model.
+This Model Checker swiftly verifies the extents of the Revit model. 
+Placing model extents more than 10 miles from the project's 
+internal origin can lead to issues with accuracy, tolerance, 
+performance, and viewport display. This check ensures that the 
+model remains within a 10-mile radius of the internal origin.
 
-    The test case checks the following, and report the extents 
-    in relation to the project’s internal origin:
+The test case examines the following, reporting extents 
+concerning the project's internal origin. The script prioritizes 
+based on the assumption that most model extent issues are
+related to the following:
 
         - The distance between project basepoint and internal origin
         - The distance between survey point and  internal origin
-        - The distance between project basepoint and survey point
-        - The elevation of the project
         - The bounding box of the 3D view
         - The bounding box of the design option objects
         - The bounding box of the CAD and RVT links
