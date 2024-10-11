@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
-__title__   = "10 Mile Radar"
-
-
-#============================================ IMPORTS
+#______________________________________________Imports
 
 #General Imports
 import sys
@@ -16,25 +13,17 @@ clr.AddReference('RevitAPI')
 from Autodesk.Revit.DB import *
 
 #pyRevit
-from pyrevit import revit, DB
+from pyrevit import revit, DB, DOCS
 from pyrevit import script
 from pyrevit import forms
+from pyrevit.preflight import PreflightTestCase
 
-#============================================ VARIABLES
-app    = __revit__.Application
-uidoc  = __revit__.ActiveUIDocument
-doc    = __revit__.ActiveUIDocument.Document #type:Document
+#______________________________________________Global Variables
+doc    = DOCS.doc #type:Document
+extentdistance = 52800 #Linear Feet (10 miles)
+intOrig = (0,0,0)
 
-#============================================ HTML Styles
-output = script.get_output()
-output.add_style('bad {color:red; font-weight:bold;}')
-output.add_style('warn {color:orange; font-weight:bold;}')
-output.add_style('good {color:green; font-weight:bold;}')
-output.add_style('cover {color:black; font-size:24pt; font-weight:bold;}')
-output.add_style('header {color:black; font-size:18pt;}')
-stringseperator = "_____________________________________________________________________________________________"
-stringnewline = ""
-#============================================ FUNCTIONS
+#______________________________________________3D to Bounding Box Analysis
 class Get3DViewBoundingBox():
     def get_tempbbox(self, ToggleCAD, ToggleRVT, ToggleIFC, ToggleAll):
         violatingCAD = []
@@ -60,7 +49,7 @@ class Get3DViewBoundingBox():
                     cadbox = cad.get_BoundingBox(None)
                     cadmin = (cadbox.Min.X, cadbox.Min.Y, cadbox.Min.Z)
                     cadmax = (cadbox.Max.X, cadbox.Max.Y, cadbox.Max.Z)
-                    if calculate_distance(cadmin, intOrig) > TenMiledistance or calculate_distance(cadmax, intOrig) > TenMiledistance:
+                    if calculate_distance(cadmin, intOrig) > extentdistance or calculate_distance(cadmax, intOrig) > extentdistance:
                         violatingCAD.append(cad)
         if ToggleRVT:
             rvtlinks = FilteredElementCollector(doc).OfClass(RevitLinkInstance).ToElements()
@@ -71,7 +60,7 @@ class Get3DViewBoundingBox():
                     rvtbox = rvt.get_BoundingBox(view)
                     rvtmin = (rvtbox.Min.X, rvtbox.Min.Y, rvtbox.Min.Z)
                     rvtmax = (rvtbox.Max.X, rvtbox.Max.Y, rvtbox.Max.Z)
-                    if calculate_distance(rvtmin, intOrig) > TenMiledistance or calculate_distance(rvtmax, intOrig) > TenMiledistance:
+                    if calculate_distance(rvtmin, intOrig) > extentdistance or calculate_distance(rvtmax, intOrig) > extentdistance:
                         violatingRVT.append(rvt)
         if ToggleIFC:
             pass
@@ -89,7 +78,7 @@ class Get3DViewBoundingBox():
             for el in elcollector:
                 if el.get_BoundingBox(view) is not None and hasattr(el, 'Name') and hasattr(el, 'Category'):
                     bbox = el.get_BoundingBox(view)
-                    if analyzebbox(bbox, intOrig) == 0:
+                    if analyzebbox(bbox, intOrig, 52800) == 0:
                         badelements.append(el)
 
         t.Dispose()
@@ -118,12 +107,23 @@ def calculate_Horizontal_Distance(point1, point2):
     deltaY = (y2 - y1)
 
     return distance, deltaX, deltaY
+
 #____________________________________________ Get Bounding Box
 def get_bounding_box(view):
     bb = view.CropBox
     min = bb.Min
     max = bb.Max
     return min, max
+
+#____________________________________________ Analyze Bounding Box
+def analyzebbox(bbox, intOrig, extentdistance):
+    min = (bbox.Min.X, bbox.Min.Y, bbox.Min.Z)
+    max = (bbox.Max.X, bbox.Max.Y, bbox.Max.Z)
+    if calculate_distance(min, intOrig) > extentdistance or calculate_distance(max, intOrig) > extentdistance:
+        Status = 0
+    else:
+        Status = 1
+    return Status
 
 #____________________________________________ Get ProjectBase and Survey Points
 def get_project_base_and_survey_points(doc):
@@ -133,7 +133,8 @@ def get_project_base_and_survey_points(doc):
     survpt_tuple = (survpt.X, survpt.Y, survpt.Z)
     intOrig = (0,0,0)
     return basept_tuple, survpt_tuple, intOrig
-#____________________________________________ GET DESIGN OPTIONS
+
+#____________________________________________ Get Design Options & Objects
 def getalldesignoptionobjects(doc):
     dbobjs = []
     design_options = FilteredElementCollector(doc).OfClass(DesignOption).ToElements()
@@ -143,141 +144,182 @@ def getalldesignoptionobjects(doc):
         dbobjs.append(x)
 
     return design_options, dbobjs
-#____________________________________________ ANALYZE BOUNDING BOX
-def analyzebbox(bbox, intOrig):
+
+#__________________________________________________________
+#____________________________________________ MAIN FUNCTION
+#__________________________________________________________
+
+def check_model_extents(doc, output):
+    #______________________________________________HTML Styles
+    output = script.get_output()
+    output.add_style('bad {color:red; font-weight:bold;}')
+    output.add_style('warn {color:orange; font-weight:bold;}')
+    output.add_style('good {color:green; font-weight:bold;}')
+    output.add_style('cover {color:black; font-size:24pt; font-weight:bold;}')
+    output.add_style('header {color:black; font-size:18pt;}')
+    stringseperator = "_____________________________________________________________________________________________"
+    stringnewline = ""
+    TestScore = 0
+    extentdistance = 52800 #Linear Feet
+    #__________________________________________check the distnaces of base and survey points
+    output.print_html('<cover>______:satellite_antenna:__10-Mile Radar___________</cover>')
+    print(stringseperator)
+    print("")
+    output.print_html('<header>Checking model placement and coordinates</header>')
+    intOrig = (0,0,0)
+    basept, survpt, intOrig = get_project_base_and_survey_points(doc)
+    surveydistance = calculate_distance(survpt, intOrig)
+    if surveydistance > extentdistance:
+        output.print_html('<bad>!!............Survey Point is more than 10 miles away from the Internal Origin.</bad>')
+    else:
+            output.print_html('<good>OK............Survey Point is less than 10 miles away from the Internal Origin.</good>')
+    baseptdistance = calculate_distance(basept, intOrig)
+    if baseptdistance > extentdistance:
+        output.print_html('<bad>!!............Project Base Point is more than 10 miles away from the Internal Origin</bad>')
+
+    else:
+            output.print_html('<good>OK............Project Base Point is less than 10 miles away from the Internal Origin.</good>')
+
+    # Print Distances
+    print (stringseperator)
+    print ("Internal Origin Coordinates = " + str(intOrig))
+    print ("Project Base Point Coordinates = " + str(basept))
+    print ("Survey Point Coordinates = " + str(survpt))
+    print("")
+    print (stringseperator)
+    print("")
+    print("")
+    print ("Project Base Point Distance from Internal Origin = " + str(baseptdistance))
+    print ("Survey Point Distance from Internal Origin = " + str(surveydistance))
+    print ("Project Base Point to Survey Delta X = " + str(calculate_Horizontal_Distance(basept, survpt)[1]))
+    print ("Project Base Point to Survey Delta Y = " + str(calculate_Horizontal_Distance(basept, survpt)[2]))
+    print ("Horizontal Distance between Project Base Point and Survey Point = " + str(calculate_distance(basept, survpt)))
+    ProjectElevation = survpt[2] - basept[2]
+    print ("Project Elevation = " + str(ProjectElevation))
+    print (stringseperator)
+    print("")
+    print("")
+
+    #__________________________________________Get the bounding box of the 3D view
+    output.print_html("<header>Checking the document's boundingbox extents </header>")
+    bbox_instance = Get3DViewBoundingBox()
+    bbox = bbox_instance.get_tempbbox(0,0,0,0)[0]
     min = (bbox.Min.X, bbox.Min.Y, bbox.Min.Z)
     max = (bbox.Max.X, bbox.Max.Y, bbox.Max.Z)
-    if calculate_distance(min, intOrig) > TenMiledistance or calculate_distance(max, intOrig) > TenMiledistance:
-        Status = 0
-    else:
-        Status = 1
-    return Status
-
-#=========================== MAIN
-
-TestScore = 0
-TenMiledistance = 52800 #Linear Feet
-#__________________________________________check the distnaces of base and survey points
-output.print_html('<cover>______:satellite_antenna:__10-Mile Radar___________</cover>')
-print(stringseperator)
-print("")
-output.print_html('<header>Checking model placement and coordinates</header>')
-basept, survpt, intOrig = get_project_base_and_survey_points(doc)
-surveydistance = calculate_distance(survpt, intOrig)
-if surveydistance > TenMiledistance:
-    output.print_html('<bad>!!............Survey Point is more than 10 miles away from the Internal Origin.</bad>')
-else:
-        output.print_html('<good>OK............Survey Point is less than 10 miles away from the Internal Origin.</good>')
-baseptdistance = calculate_distance(basept, intOrig)
-if baseptdistance > TenMiledistance:
-    output.print_html('<bad>!!............Project Base Point is more than 10 miles away from the Internal Origin</bad>')
-
-else:
-        output.print_html('<good>OK............Project Base Point is less than 10 miles away from the Internal Origin.</good>')
-
-# Print Distances
-print (stringseperator)
-print ("Internal Origin Coordinates = " + str(intOrig))
-print ("Project Base Point Coordinates = " + str(basept))
-print ("Survey Point Coordinates = " + str(survpt))
-print("")
-print (stringseperator)
-print("")
-print("")
-print ("Project Base Point Distance from Internal Origin = " + str(baseptdistance))
-print ("Survey Point Distance from Internal Origin = " + str(surveydistance))
-print ("Project Base Point to Survey Delta X = " + str(calculate_Horizontal_Distance(basept, survpt)[1]))
-print ("Project Base Point to Survey Delta Y = " + str(calculate_Horizontal_Distance(basept, survpt)[2]))
-print ("Horizontal Distance between Project Base Point and Survey Point = " + str(calculate_distance(basept, survpt)))
-ProjectElevation = survpt[2] - basept[2]
-print ("Project Elevation = " + str(ProjectElevation))
-print (stringseperator)
-print("")
-print("")
-
-#__________________________________________Get the bounding box of the 3D view
-output.print_html("<header>Checking the document's boundingbox extents </header>")
-bbox_instance = Get3DViewBoundingBox()
-bbox = bbox_instance.get_tempbbox(0,0,0,0)[0]
-min = (bbox.Min.X, bbox.Min.Y, bbox.Min.Z)
-max = (bbox.Max.X, bbox.Max.Y, bbox.Max.Z)
-print("")
-print(stringseperator)
-print("")
-if calculate_distance(min, intOrig) > TenMiledistance or calculate_distance(max, intOrig) > TenMiledistance:
-    output.print_html('<bad>!!............3D View Bounding Box extends more than 10 miles away from the Internal Origin</bad>')
-else:
-    output.print_html('<good>OK............3D View Bounding Box is located less than 10 miles away from the Internal Origin.</good>')
-    TestScore += 1
-
-#__________________________________________Get Objects in Design Options
-print("")
-print(stringseperator)
-output.print_html("<header>Checking the design options objects</header>")
-print(stringseperator)
-design_option_objects = getalldesignoptionobjects(doc)
-violating_design_option_objects = []
-violating_options = []
-for x in design_option_objects[1]:
-    for y in x:
-        dbbox = y.get_BoundingBox(None)
-        dbmin = (dbbox.Min.X, dbbox.Min.Y, dbbox.Min.Z)
-        dbmax = (dbbox.Max.X, dbbox.Max.Y, dbbox.Max.Z)
-        if calculate_distance(dbmin, intOrig) > TenMiledistance or calculate_distance(dbmax, intOrig) > TenMiledistance:
-            violating_design_option_objects.append(x)
-            if y.DesignOption.Name not in violating_options:
-                violating_options.append(y.DesignOption.Name)
-if len(violating_design_option_objects) > 0:
-    output.print_html('<bad>!!............Design Option Objects are located more than 10 miles away from the Internal Origin</bad>')
-    for x in violating_design_option_objects:
-        for y in x:
-            print(output.linkify(y.Id), y.Name, " - Is part of design option - ", y.DesignOption.Name )
-else:
-    output.print_html('<good>OK............Design Option Objects are located less than 10 miles away from the Internal Origin.</good>')
-    TestScore += 1
-#__________________________________________Check Test Score
-if TestScore >= 2:
-    output.print_html('<good>OK............All Tests Passed.</good>')
-    sys.exit()
-else:
-    output.print_html('<bad>!!............Distant objects detected, Proceeding with additional analysis</bad>')
-
-#__________________________________________Check CAD and RVT Links
-print(stringseperator)
-output.print_html('<header>Checking CAD and RVT Links</header>')
-print(stringseperator)
-bboxLink = bbox_instance.get_tempbbox(1,1,1,0)
-badcads = bboxLink[1]
-badrvts = bboxLink[2]
-cleanbbox = bboxLink[3]
-# print (bboxLink[1], bboxLink[2])
-# print(bbox.Min, cleanbbox.Min)
-if len(badcads) > 0 or len(badrvts) > 0:
-    for x in badcads:
-        print("  ", output.linkify(x.Id),"__" , x.Name, x.Category.Name, end=" ")
-    for x in badrvts:
-        print"  ", (output.linkify(x.Id),"__" , x.Name, x.Category.Name, end=" ")
-else:
-    output.print_html('<good>OK............All CAD and RVT Links are located less than 10 miles away from the Internal Origin.</good>')
-    TestScore += 1
+    print("")
     print(stringseperator)
-if analyzebbox(cleanbbox, intOrig) == 0:
-    output.print_html('<warn>!!............Distant objects are still being detected!</warn>')
-    output.print_html('<warn>!!............Further Analysis Required.</warn>')
-else:
-    output.print_html('<good>OK............All Objects are located less than 10 miles away from the Internal Origin.</good>')
-    sys.exit()
-print(stringseperator)
-output.print_html('<header>Checking everything, It is going to take a while.</header>')
-output.print_html('<header>please be patient.</header>')
-#__________________________________________Check Bounding Box of Every Element in the Model
-print(stringseperator)
-getbadelements = bbox_instance.get_tempbbox(0,0,0,1)
-badelements = getbadelements[4]
-if len(badelements) > 0:
-    output.print_html('<bad>!!............Elements below are located more than 10 miles away from the Internal Origin</bad>')
-    for x in badelements:
-        print("  ", output.linkify(x.Id), x.Name, x.Category.Name, end=" ")
-else:
-    output.print_html('<good>.........All Objects are located less than 10 miles away from the Internal Origin.</good>')
-    TestScore += 1
+    print("")
+    if calculate_distance(min, intOrig) > extentdistance or calculate_distance(max, intOrig) > extentdistance:
+        output.print_html('<bad>!!............3D View Bounding Box extends more than 10 miles away from the Internal Origin</bad>')
+    else:
+        output.print_html('<good>OK............3D View Bounding Box is located less than 10 miles away from the Internal Origin.</good>')
+        TestScore += 1
+
+    #__________________________________________Get Objects in Design Options
+    print("")
+    print(stringseperator)
+    output.print_html("<header>Checking the design options objects</header>")
+    print(stringseperator)
+    design_option_objects = getalldesignoptionobjects(doc)
+    violating_design_option_objects = []
+    violating_options = []
+    for x in design_option_objects[1]:
+        for y in x:
+            dbbox = y.get_BoundingBox(None)
+            dbmin = (dbbox.Min.X, dbbox.Min.Y, dbbox.Min.Z)
+            dbmax = (dbbox.Max.X, dbbox.Max.Y, dbbox.Max.Z)
+            if calculate_distance(dbmin, intOrig) > extentdistance or calculate_distance(dbmax, intOrig) > extentdistance:
+                violating_design_option_objects.append(x)
+                if y.DesignOption.Name not in violating_options:
+                    violating_options.append(y.DesignOption.Name)
+    if len(violating_design_option_objects) > 0:
+        output.print_html('<bad>!!............Design Option Objects are located more than 10 miles away from the Internal Origin</bad>')
+        for x in violating_design_option_objects:
+            for y in x:
+                print(output.linkify(y.Id)+ str(y.Name)+ " - Is part of design option - "+ str(y.DesignOption.Name) )
+    else:
+        output.print_html('<good>OK............Design Option Objects are located less than 10 miles away from the Internal Origin.</good>')
+        TestScore += 1
+    #__________________________________________Check Test Score
+    if TestScore >= 2:
+        output.print_html('<good>OK............All Tests Passed.</good>')
+        sys.exit()
+    else:
+        output.print_html('<bad>!!............Distant objects detected, Proceeding with additional analysis</bad>')
+
+    #__________________________________________Check CAD and RVT Links
+    print(stringseperator)
+    output.print_html('<header>Checking CAD and RVT Links</header>')
+    print(stringseperator)
+    bboxLink = bbox_instance.get_tempbbox(1,1,1,0)
+    badcads = bboxLink[1]
+    badrvts = bboxLink[2]
+    cleanbbox = bboxLink[3]
+    # print (bboxLink[1], bboxLink[2])
+    # print(bbox.Min, cleanbbox.Min)
+    if len(badcads) > 0 or len(badrvts) > 0:
+        for x in badcads:
+            print(output.linkify(x.Id)+"__" + str(x.Name) + str(x.Category.Name))
+        for x in badrvts:
+            print(output.linkify(x.Id)+"__" + str(x.Name) + str(x.Category.Name))
+    else:
+        output.print_html('<good>OK............All CAD and RVT Links are located less than 10 miles away from the Internal Origin.</good>')
+        TestScore += 1
+        print(stringseperator)
+    if analyzebbox(cleanbbox, intOrig, 5) == 0:
+        output.print_html('<warn>!!............Distant objects are still being detected!</warn>')
+        output.print_html('<warn>!!............Further Analysis Required.</warn>')
+    else:
+        output.print_html('<good>OK............All Objects are located less than 10 miles away from the Internal Origin.</good>')
+        sys.exit()
+    print(stringseperator)
+    output.print_html('<header>Checking everything, It is going to take a while.</header>')
+    output.print_html('<header>please be patient.</header>')
+    #__________________________________________Check Bounding Box of Every Element in the Model
+    print(stringseperator)
+    getbadelements = bbox_instance.get_tempbbox(0,0,0,1)
+    badelements = getbadelements[4]
+    if len(badelements) > 0:
+        output.print_html('<bad>!!............Elements below are located more than 10 miles away from the Internal Origin</bad>')
+        for x in badelements:
+            print(output.linkify(x.Id)+ '  ' + str(x.Name) + '  ' + str(x.Category.Name))
+    else:
+        output.print_html('<good>.........All Objects are located less than 10 miles away from the Internal Origin.</good>')
+        TestScore += 1
+
+#______________________________________________Model Checker Class
+
+class ModelChecker(PreflightTestCase):
+    """
+    Revit model quality check
+    The Model Checker test case checks extents of the Revit model:
+        Positioning model extents beyond 10 miles from the project’s internal origin can cause issues with 
+        accuracy, tolerance, performance, and viewport display.
+
+    The test case checks the following, and report the extents 
+    in relation to the project’s internal origin:
+
+        - The distance between project basepoint and internal origin
+        - The distance between survey point and  internal origin
+        - The distance between project basepoint and survey point
+        - The elevation of the project
+        - The bounding box of the 3D view
+        - The bounding box of the design option objects
+        - The bounding box of the CAD and RVT links
+        - The bounding box of all elements in the model
+    """
+
+    name = "10 Mile Radar"
+    author = "Tay Othman"
+
+    def setUp(self, doc, output):
+        pass
+
+    def startTest(self, doc, output):
+        check_model_extents(doc, output)
+
+    def tearDown(self, doc, output):
+        pass
+    
+    def doCleanups(self, doc, output):
+        pass
