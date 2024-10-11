@@ -158,7 +158,7 @@ def analyzebbox(bbox, intOrig):
 TestScore = 0
 TenMiledistance = 52800 #Linear Feet
 #__________________________________________check the distnaces of base and survey points
-output.print_html('<cover>______:satellite_antenna:__Ten Mile Radar___________</cover>')
+output.print_html('<cover>______:satellite_antenna:__10-Mile Radar___________</cover>')
 print(stringseperator)
 print("")
 output.print_html('<header>Checking model placement and coordinates</header>')
@@ -254,9 +254,9 @@ cleanbbox = bboxLink[3]
 # print(bbox.Min, cleanbbox.Min)
 if len(badcads) > 0 or len(badrvts) > 0:
     for x in badcads:
-        print(output.linkify(x.Id),"__" , x.Name, x.Category.Name)
+        print("  ", output.linkify(x.Id),"__" , x.Name, x.Category.Name, end=" ")
     for x in badrvts:
-        print(output.linkify(x.Id),"__" , x.Name, x.Category.Name)
+        print"  ", (output.linkify(x.Id),"__" , x.Name, x.Category.Name, end=" ")
 else:
     output.print_html('<good>OK............All CAD and RVT Links are located less than 10 miles away from the Internal Origin.</good>')
     TestScore += 1
@@ -277,7 +277,7 @@ badelements = getbadelements[4]
 if len(badelements) > 0:
     output.print_html('<bad>!!............Elements below are located more than 10 miles away from the Internal Origin</bad>')
     for x in badelements:
-        print(output.linkify(x.Id), x.Name, x.Category.Name)
+        print("  ", output.linkify(x.Id), x.Name, x.Category.Name, end=" ")
 else:
     output.print_html('<good>.........All Objects are located less than 10 miles away from the Internal Origin.</good>')
     TestScore += 1
