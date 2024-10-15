@@ -100,6 +100,13 @@ def calculate_distance(point1, point2):
 
     return distance
 
+def convert_units(doc, distance):
+    # Get the current units of the project
+    project_units = doc.GetUnits().GetFormatOptions(UnitType.UT_Length).DisplayUnits
+    # Convert the distance to the project units
+    distance = UnitUtils.ConvertFromInternalUnits(distance, project_units)
+    return distance
+
 #____________________________________________ Calculate Horizontal Distance
 def calculate_Horizontal_Distance(point1, point2):
     # Unpack the tuples
@@ -156,57 +163,52 @@ def getalldesignoptionobjects(doc):
 
 def check_model_extents(doc, output):
     #______________________________________________HTML Styles
+
     output = script.get_output()
     output.add_style('bad {color:red; font-weight:bold;}')
     output.add_style('warn {color:orange; font-weight:bold;}')
     output.add_style('good {color:green; font-weight:bold;}')
     output.add_style('cover {color:black; font-size:24pt; font-weight:bold;}')
     output.add_style('header {color:black; font-size:15pt;}')
-    stringseperator = "_____________________________________________________________________________________________"
+    stringseperator = "_________________________________________________________________________________________________"
     TestScore = 0
     extentdistance = 52800 #Linear Feet
     #__________________________________________check the distnaces of base and survey points
-    output.print_html('<cover>________:satellite_antenna:__10-Mile Radar___________</cover>')
+    output.print_html('<cover>__________:satellite_antenna:__10-Mile Radar___________</cover>')
     print(stringseperator)
     print("")
-    output.print_html('<header>Checking model placement and coordinates</header>')
+    
+    output.print_md('# Checking model placement and coordinates')
     print(stringseperator)
     intOrig = (0,0,0)
     basept, survpt, intOrig = get_project_base_and_survey_points(doc)
     surveydistance = calculate_distance(survpt, intOrig)
     if surveydistance > extentdistance:
-        output.print_html('<bad>!!............Survey Point is more than 10 miles away from the Internal Origin.</bad>')
+        output.print_md('### : thumbs_down_medium_skin_tone: ............Survey Point is more than 10 miles (16KM) away from the Internal Origin.***')
+        output.print_md('## Survey Point Distance from Internal Origin: ' + str(convert_units(doc, surveydistance)) + ' ' + doc.GetUnits().GetFormatOptions(UnitType.UT_Length).DisplayUnits.ToString())
     else:
-            output.print_html('<good>OK............Survey Point is less than 10 miles away from the Internal Origin.</good>')
+            output.print_md('### :OK_hand_medium_skin_tone: ............Survey Point is less than 10 miles away from the Internal Origin.***')
     baseptdistance = calculate_distance(basept, intOrig)
-    if baseptdistance > extentdistance:
-        output.print_html('<bad>!!............Project Base Point is more than 10 miles away from the Internal Origin</bad>')
 
-    else:
-            output.print_html('<good>OK............Project Base Point is less than 10 miles away from the Internal Origin.</good>')
+    tabledata = [['InternaL Origin Coordinates', str(intOrig)], 
+                  ['Project Base Point Coordinates', str(basept)], 
+                  ['Survey Point Coordinates', str(survpt)],
+                    ['Project Base Point Distance from Internal Origin', str(baseptdistance)],
+                    ['Survey Point Distance from Internal Origin', str(surveydistance)],
+                    ['Project Base Point to Survey Delta X', str(calculate_Horizontal_Distance(basept, survpt)[1])],
+                    ['Project Base Point to Survey Delta Y', str(calculate_Horizontal_Distance(basept, survpt)[2])],
+                    ['Horizontal Distance between Project Base Point and Survey Point', str(calculate_distance(basept, survpt))],
+                    ['Project Elevation', str(survpt[2] - basept[2])]]
 
-    # Print Distances
-    print (stringseperator)
-    print ("Internal Origin Coordinates = " + str(intOrig))
-    print ("Project Base Point Coordinates = " + str(basept))
-    print ("Survey Point Coordinates = " + str(survpt))
-    print("")
-    print (stringseperator)
-    print("")
-    print("")
-    print ("Project Base Point Distance from Internal Origin = " + str(baseptdistance))
-    print ("Survey Point Distance from Internal Origin = " + str(surveydistance))
-    print ("Project Base Point to Survey Delta X = " + str(calculate_Horizontal_Distance(basept, survpt)[1]))
-    print ("Project Base Point to Survey Delta Y = " + str(calculate_Horizontal_Distance(basept, survpt)[2]))
-    print ("Horizontal Distance between Project Base Point and Survey Point = " + str(calculate_distance(basept, survpt)))
-    ProjectElevation = survpt[2] - basept[2]
-    print ("Project Elevation = " + str(ProjectElevation))
-    print (stringseperator)
-    print("")
-    print("")
+    # Print Table
+    output.print_table(table_data=tabledata, 
+                       title='Project Coordinates and Distances',
+                       columns=['Coordinates', 'Values'],
+                       formats=['', ''])
 
     #__________________________________________Get the bounding box of the 3D view
-    output.print_html("<header>Checking the document's boundingbox extents </header>")
+    print("")
+    output.print_md('# Checking the extents of the 3D view bounding box')
     bbox_instance = Get3DViewBoundingBox()
     bbox = bbox_instance.get_tempbbox(0,0,0,0)[0]
     min = (bbox.Min.X, bbox.Min.Y, bbox.Min.Z)
@@ -223,7 +225,7 @@ def check_model_extents(doc, output):
     #__________________________________________Get Objects in Design Options
     print("")
     print(stringseperator)
-    output.print_html("<header>Checking the design options objects</header>")
+    output.print_md('# Checking the extents of the design option objects')
     print(stringseperator)
     design_option_objects = getalldesignoptionobjects(doc)
     violating_design_option_objects = []
@@ -231,12 +233,15 @@ def check_model_extents(doc, output):
     for x in design_option_objects[1]:
         for y in x:
             dbbox = y.get_BoundingBox(None)
-            dbmin = (dbbox.Min.X, dbbox.Min.Y, dbbox.Min.Z)
-            dbmax = (dbbox.Max.X, dbbox.Max.Y, dbbox.Max.Z)
-            if calculate_distance(dbmin, intOrig) > extentdistance or calculate_distance(dbmax, intOrig) > extentdistance:
-                violating_design_option_objects.append(x)
-                if y.DesignOption.Name not in violating_options:
-                    violating_options.append(y.DesignOption.Name)
+            if dbbox is None:
+                continue
+            else:
+                dbmin = (dbbox.Min.X, dbbox.Min.Y, dbbox.Min.Z)
+                dbmax = (dbbox.Max.X, dbbox.Max.Y, dbbox.Max.Z)
+                if calculate_distance(dbmin, intOrig) > extentdistance or calculate_distance(dbmax, intOrig) > extentdistance:
+                    violating_design_option_objects.append(x)
+                    if y.DesignOption.Name not in violating_options:
+                        violating_options.append(y.DesignOption.Name)
     if len(violating_design_option_objects) > 0:
         output.print_html('<bad>!!............Design Option Objects are located more than 10 miles away from the Internal Origin</bad>')
         for x in violating_design_option_objects:
@@ -254,7 +259,7 @@ def check_model_extents(doc, output):
 
     #__________________________________________Check CAD and RVT Links
     print(stringseperator)
-    output.print_html('<header>Checking CAD and RVT Links</header>')
+    output.print_md('# Checking the extents of the CAD and RVT links')
     print(stringseperator)
     bboxLink = bbox_instance.get_tempbbox(1,1,1,0)
     badcads = bboxLink[1]
