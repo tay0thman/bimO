@@ -18,15 +18,18 @@ clr.AddReference('RevitAPI')
 from Autodesk.Revit.DB import *
 
 #pyRevit
-from pyrevit import revit, DB, DOCS
+from pyrevit import revit, DB, DOCS, HOST_APP
 from pyrevit import script
 from pyrevit import forms
 from pyrevit.preflight import PreflightTestCase
 
 #______________________________________________Global Variables
 doc    = DOCS.doc #type:Document
-extentdistance = 52800 #Linear Feet (10 miles)
 intOrig = (0,0,0)
+extentdistance = 52800 #Linear Feet
+
+#Document UI Units
+
 
 #______________________________________________3D to Bounding Box Analysis
 class Get3DViewBoundingBox():
@@ -101,11 +104,23 @@ def calculate_distance(point1, point2):
     return distance
 
 def convert_units(doc, distance):
-    # Get the current units of the project
-    project_units = doc.GetUnits().GetFormatOptions(UnitType.UT_Length).DisplayUnits
-    # Convert the distance to the project units
-    distance = UnitUtils.ConvertFromInternalUnits(distance, project_units)
-    return distance
+
+    if HOST_APP.is_newer_than(2021):
+        UIunits = DB.UnitFormatUtils.Format(units=doc.GetUnits(),
+                                            specTypeId=DB.SpecTypeId.Length,
+                                            value=distance,
+                                            forEditing=False)
+
+
+    else:
+        UIunits = DB.UnitFormatUtils(units=doc.GetUnits(),
+                                     unitType=DB.UnitType.UT_Length,
+                                        value=distance,
+                                        maxAccuracy=False,
+                                        forEditing=False)
+
+    return UIunits
+
 
 #____________________________________________ Calculate Horizontal Distance
 def calculate_Horizontal_Distance(point1, point2):
@@ -165,14 +180,10 @@ def check_model_extents(doc, output):
     #______________________________________________HTML Styles
 
     output = script.get_output()
-    output.add_style('bad {color:red; font-weight:bold;}')
-    output.add_style('warn {color:orange; font-weight:bold;}')
-    output.add_style('good {color:green; font-weight:bold;}')
     output.add_style('cover {color:black; font-size:24pt; font-weight:bold;}')
     output.add_style('header {color:black; font-size:15pt;}')
     stringseperator = "_________________________________________________________________________________________________"
     TestScore = 0
-    extentdistance = 52800 #Linear Feet
     #__________________________________________check the distnaces of base and survey points
     output.print_html('<cover>__________:satellite_antenna:__10-Mile Radar___________</cover>')
     print(stringseperator)
@@ -182,23 +193,25 @@ def check_model_extents(doc, output):
     print(stringseperator)
     intOrig = (0,0,0)
     basept, survpt, intOrig = get_project_base_and_survey_points(doc)
-    surveydistance = calculate_distance(survpt, intOrig)
+    baseptdistance = abs(calculate_distance(basept, intOrig))
+    surveydistance = abs(calculate_distance(survpt, intOrig))
+    if baseptdistance > extentdistance:
+        output.print_md('### :thumbs_down_medium_skin_tone: ............Project Base Point is more than 10 miles (16KM) away from the Internal Origin.***')
     if surveydistance > extentdistance:
-        output.print_md('### : thumbs_down_medium_skin_tone: ............Survey Point is more than 10 miles (16KM) away from the Internal Origin.***')
-        output.print_md('## Survey Point Distance from Internal Origin: ' + str(convert_units(doc, surveydistance)) + ' ' + doc.GetUnits().GetFormatOptions(UnitType.UT_Length).DisplayUnits.ToString())
+        output.print_md('### :thumbs_down_medium_skin_tone: ............Survey Point is more than 10 miles (16KM) away from the Internal Origin.***')
     else:
-            output.print_md('### :OK_hand_medium_skin_tone: ............Survey Point is less than 10 miles away from the Internal Origin.***')
+            output.print_md('### :OK_hand_medium_skin_tone: ............Survey Point is less than 10 miles (16KM) away from the Internal Origin.***')
     baseptdistance = calculate_distance(basept, intOrig)
 
     tabledata = [['InternaL Origin Coordinates', str(intOrig)], 
                   ['Project Base Point Coordinates', str(basept)], 
                   ['Survey Point Coordinates', str(survpt)],
-                    ['Project Base Point Distance from Internal Origin', str(baseptdistance)],
-                    ['Survey Point Distance from Internal Origin', str(surveydistance)],
-                    ['Project Base Point to Survey Delta X', str(calculate_Horizontal_Distance(basept, survpt)[1])],
-                    ['Project Base Point to Survey Delta Y', str(calculate_Horizontal_Distance(basept, survpt)[2])],
-                    ['Horizontal Distance between Project Base Point and Survey Point', str(calculate_distance(basept, survpt))],
-                    ['Project Elevation', str(survpt[2] - basept[2])]]
+                    ['Project Base Point Distance from Internal Origin', str(convert_units(doc, baseptdistance))],
+                    ['Survey Point Distance from Internal Origin', str(convert_units(doc, surveydistance))],
+                    ['Project Base Point to Survey Delta X', str(convert_units(doc, calculate_Horizontal_Distance(basept, survpt)[1]))],
+                    ['Project Base Point to Survey Delta Y', str(convert_units(doc, calculate_Horizontal_Distance(basept, survpt)[2]))],
+                    ['Horizontal Distance between Project Base Point and Survey Point', str(convert_units(doc, calculate_Horizontal_Distance(basept, survpt)[0]))],
+                    ['Project Elevation', str(convert_units(doc, (survpt[2] - basept[2])))]]
 
     # Print Table
     output.print_table(table_data=tabledata, 
@@ -217,9 +230,9 @@ def check_model_extents(doc, output):
     print(stringseperator)
     print("")
     if calculate_distance(min, intOrig) > extentdistance or calculate_distance(max, intOrig) > extentdistance:
-        output.print_html('<bad>!!............3D View Bounding Box extends more than 10 miles away from the Internal Origin</bad>')
+        output.print_md('### :thumbs_down_medium_skin_tone: ............3D View Bounding Box extends more than 10 miles (16KM) away from the Internal Origin.***')
     else:
-        output.print_html('<good>OK............3D View Bounding Box is located less than 10 miles away from the Internal Origin.</good>')
+        output.print_md('### :OK_hand_medium_skin_tone: ............3D View Bounding Box is located less than 10 miles (16KM) away from the Internal Origin.***')
         TestScore += 1
 
     #__________________________________________Get Objects in Design Options
@@ -243,19 +256,28 @@ def check_model_extents(doc, output):
                     if y.DesignOption.Name not in violating_options:
                         violating_options.append(y.DesignOption.Name)
     if len(violating_design_option_objects) > 0:
-        output.print_html('<bad>!!............Design Option Objects are located more than 10 miles away from the Internal Origin</bad>')
+        output.print_md('### :thumbs_down_medium_skin_tone: ............Design Option Objects are located more than 10 miles (16KM) away from the Internal Origin.***')
+        if len(violating_design_option_objects) > 10:
+            output.print_md('### :warning: ............Showing the first 10 objects***')
+            output.print_md('### :warning: ............Manual investigation is required***')
+        counter = 0
+        limit = 10
         for x in violating_design_option_objects:
+
             for y in x:
+                if counter == limit:
+                    break
                 print(output.linkify(y.Id)+ str(y.Name)+ " - Is part of design option - "+ str(y.DesignOption.Name) )
+                counter += 1
     else:
-        output.print_html('<good>OK............No object in any design option is located more than 10 miles away from the Internal Origin.</good>')
+        output.print_md('### :OK_hand_medium_skin_tone: ............No object in any design option is located more than 10 miles (16KM) away from the Internal Origin.***')
         TestScore += 1
     #__________________________________________Check Test Score
     if TestScore >= 2:
-        output.print_html('<good>OK............All Tests Passed.</good>')
+        output.print_md('### :OK_hand_medium_skin_tone: ............All Tests Passed.***')
         sys.exit()
     else:
-        output.print_html('<bad>!!............Distant objects detected, Proceeding with additional analysis</bad>')
+        output.print_md('### :thumbs_down_medium_skin_tone: ............Distant objects detected, Proceeding with additional analysis')
 
     #__________________________________________Check CAD and RVT Links
     print(stringseperator)
@@ -267,34 +289,51 @@ def check_model_extents(doc, output):
     cleanbbox = bboxLink[3]
     # print (bboxLink[1], bboxLink[2])
     # print(bbox.Min, cleanbbox.Min)
+    counter = 0
+    limit = 5
     if len(badcads) > 0 or len(badrvts) > 0:
         for x in badcads:
             print(output.linkify(x.Id)+"__" + str(x.Name) + '  ' + str(x.Category.Name))
+            if counter == limit:
+                break
+            counter += 1
+        counter = 0
         for x in badrvts:
             print(output.linkify(x.Id)+"__" + str(x.Name) + '  ' + str(x.Category.Name))
+            if counter == limit:
+                break
+            counter += 1
     else:
-        output.print_html('<good>OK............All CAD and RVT Links are located less than 10 miles away from the Internal Origin.</good>')
+        output.print_md('### :OK_hand_medium_skin_tone: ............All CAD and RVT Links are located less than 10 miles (16KM) away from the Internal Origin.***')
         TestScore += 1
         print(stringseperator)
     if analyzebbox(cleanbbox, intOrig, 5) == 0:
-        output.print_html('<warn>!!............Distant objects are still being detected!</warn>')
-        output.print_html('<warn>!!............Further Analysis Required.</warn>')
+        output.print_md('### :thumbs_down_medium_skin_tone: ............Distant objects are still being detected!')
+        output.print_md('### :warning: ............Further Analysis Required.')
     else:
-        output.print_html('<good>OK............All Objects are located less than 10 miles away from the Internal Origin.</good>')
+        output.print_md('### :OK_hand_medium_skin_tone: ............All Objects are located less than 10 miles (16KM) away from the Internal Origin.***')
         sys.exit()
     print(stringseperator)
-    output.print_html('<header>Checking everything, It is going to take a while.</header>')
-    output.print_html('<header>please be patient.</header>')
+    output.print_md('# Checking everything, It is going to take a while.')
+    output.print_md('# Please be patient.')
     #__________________________________________Check Bounding Box of Every Element in the Model
     print(stringseperator)
     getbadelements = bbox_instance.get_tempbbox(0,0,0,1)
     badelements = getbadelements[4]
+    counter = 0
+    limit = 10
     if len(badelements) > 0:
-        output.print_html('<bad>!!............Elements below are located more than 10 miles away from the Internal Origin</bad>')
+        if len(badelements) > limit:
+            output.print_md('### :warning: ............Showing the first 10 objects***')
+            output.print_md('### :warning: ............Manual investigation is required***')
+        output.print_md('### :thumbs_down_medium_skin_tone: ............Elements below are located more than 10 miles (16KM) away from the Internal Origin')
         for x in badelements:
             print(output.linkify(x.Id)+ '  ' + str(x.Name) + '  ' + str(x.Category.Name))
+            if counter == limit:
+                break
+            counter += 1
     else:
-        output.print_html('<good>.........All Objects are located less than 10 miles away from the Internal Origin.</good>')
+        output.print_md('### :OK_hand_medium_skin_tone: ............All Objects are located less than 10 miles (16KM) away from the Internal Origin.***')
         TestScore += 1
 
 #______________________________________________Model Checker Class
@@ -303,7 +342,7 @@ class ModelChecker(PreflightTestCase):
     """
     Checks the extents of all elements in the model.
 This Model Checker swiftly verifies the extents of the Revit model. 
-Placing model extents more than 10 miles from the project's 
+Placing model extents more than 10 miles (16KM) from the project's 
 internal origin can lead to issues with accuracy, tolerance, 
 performance, and viewport display. This check ensures that the 
 model remains within a 10-mile radius of the internal origin.
