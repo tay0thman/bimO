@@ -18,9 +18,8 @@ clr.AddReference('RevitAPI')
 from Autodesk.Revit.DB import *
 
 #pyRevit
-from pyrevit import revit, DB, DOCS, HOST_APP
+from pyrevit import DB, DOCS, HOST_APP
 from pyrevit import script
-from pyrevit import forms
 from pyrevit.preflight import PreflightTestCase
 
 #______________________________________________Global Variables
@@ -105,6 +104,7 @@ def calculate_distance(point1, point2):
 
 def convert_units(doc, distance):
 
+
     if HOST_APP.is_newer_than(2021):
         UIunits = DB.UnitFormatUtils.Format(units=doc.GetUnits(),
                                             specTypeId=DB.SpecTypeId.Length,
@@ -178,7 +178,6 @@ def getalldesignoptionobjects(doc):
 
 def check_model_extents(doc, output):
     #______________________________________________HTML Styles
-
     output = script.get_output()
     output.add_style('cover {color:black; font-size:24pt; font-weight:bold;}')
     output.add_style('header {color:black; font-size:15pt;}')
