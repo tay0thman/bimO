@@ -103,6 +103,32 @@ class Get3DViewBoundingBox():
                             bad_elements.append(element)
         return bb, bad_cads, bad_rvts, bbh, bad_elements
 
+# ___________________________________________________________ Convert values
+def convert_values(value, document=doc):
+    if HOST_APP.is_newer_than(2021):
+        ui_units = document.GetUnits().GetFormatOptions(DB.SpecTypeId.Length).GetUnitTypeId()
+    else:
+        ui_units = document.GetUnits().GetFormatOptions(DB.UnitType.UT_Length).DisplayUnits
+
+    ui_values = DB.UnitUtils.ConvertFromInternalUnits(value, ui_units)
+    return ui_values
+
+
+# ___________________________________________________________ Convert Units
+def convert_units(distance, document=doc):
+    if HOST_APP.is_newer_than(2021):
+        ui_units = DB.UnitFormatUtils.Format(units=document.GetUnits(),
+                                            specTypeId=DB.SpecTypeId.Length,
+                                            value=distance,
+                                            forEditing=True)
+    else:
+        ui_units = DB.UnitFormatUtils.Format(units=document.GetUnits(),
+                                             unitType=DB.UnitType.UT_Length, 
+                                             value=distance, maxAccuracy=False, 
+                                             forEditing=True)
+    return ui_units
+
+
 # ___________________________________________________________ Calculate Distance
 def calculate_distance(point1, point2):
     # Unpack the tuples
@@ -112,21 +138,6 @@ def calculate_distance(point1, point2):
     distance =( #rounded to the nearest inch
         round(math.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2) * 12) / 12)
     return distance
-
-
-def convert_units(doc, distance):
-    if HOST_APP.is_newer_than(2021):
-        ui_units = DB.UnitFormatUtils.Format(units=doc.GetUnits(),
-                                            specTypeId=DB.SpecTypeId.Length,
-                                            value=distance,
-                                            forEditing=True)
-    else:
-        ui_units = DB.UnitFormatUtils.Format(units=doc.GetUnits(),
-                                             unitType=DB.UnitType.UT_Length, 
-                                             value=distance, maxAccuracy=False, 
-                                             forEditing=True)
-    return ui_units
-
 
 # ________________________________________________ Calculate Horizontal Distance
 def calculate_horizontal_distance(point1, point2):
@@ -174,9 +185,10 @@ def check_bounding_box(bbox, intorig, extentdistance):
 # ____________________________________________ Get ProjectBase and Survey Points
 def get_project_base_and_survey_pts(document=doc):
     base_point = DB.BasePoint.GetProjectBasePoint(document).Position
-    base_point_coordinates = (int(base_point.X),
-                              int(base_point.Y),
-                              int(base_point.Z))
+    base_point_coordinates = (
+                                int(base_point.X),
+                                int(base_point.Y),
+                                int(base_point.Z))
     survey_point = DB.BasePoint.GetSurveyPoint(document).Position
     survey_point_coordinates = (
                                 int(survey_point.X),
@@ -229,6 +241,7 @@ def check_model_extents(document=doc):
     baspt, survpt, INTERNAL_ORIGIN = get_project_base_and_survey_pts(document)
     basptdistance = abs(calculate_distance(baspt, INTERNAL_ORIGIN))
     surveydistance = abs(calculate_distance(survpt, INTERNAL_ORIGIN))
+
     if basptdistance > EXTENT_DISTANCE:
         output.print_md(BAD_STRG + 
         'Base Point is more than ' + CRITERIA_STRG)
@@ -248,30 +261,34 @@ def check_model_extents(document=doc):
         str(INTERNAL_ORIGIN[0]),str(INTERNAL_ORIGIN[1]),str(INTERNAL_ORIGIN[2]),
         ' ', ' '],
         ['Project Base Point Coordinates to Internal Origin', 
-        str(baspt[0]),str(baspt[1]),str(baspt[2]), 
-        str(convert_units(document, basptdistance)), baseptangle],
+            str(convert_values(baspt[0],doc)),
+            str(convert_values(baspt[1],doc)),
+            str(convert_values(baspt[2], doc)), 
+            str(convert_units(basptdistance, document)), baseptangle],
         ['Survey Point Coordinates to Internal Origin', 
-        str(survpt[0],),str(survpt[1],),str(survpt[2]),
-        str(convert_units(document, surveydistance)), surveyptangle],
+            str(convert_values(survpt[0], doc)),
+            str(convert_values(survpt[1], doc)),
+            str(convert_values(survpt[2], doc)),
+            str(convert_units(surveydistance, document)), surveyptangle],
         ['Project Base Point to Survey Delta X', ' ', ' ', ' ',
-        str(convert_units(document, 
-                calculate_horizontal_distance(baspt, survpt)[1]))],
+            str(convert_units(calculate_horizontal_distance(
+                baspt, survpt)[1], document))],
         ['Project Base Point to Survey Delta Y', ' ', ' ', ' ',
-        str(convert_units(document, 
-                calculate_horizontal_distance(baspt, survpt)[2]))],
+            str(convert_units(calculate_horizontal_distance(
+                baspt, survpt)[2], document))],
         ['Planar Distance between Base Point and Survey Point',
         ' ', ' ', ' ', 
-        str(convert_units(document, 
-                calculate_horizontal_distance(baspt, survpt)[0])),
+            str(convert_units(calculate_horizontal_distance(
+                baspt, survpt)[0], document)),
                 truenorthangle],
         ['Total Distance between Base Point and Survey Point',
         ' ', ' ', ' ',
-        str(convert_units(document, 
-                    calculate_distance(baspt, survpt))),
+            str(convert_units(calculate_distance(
+                baspt, survpt), document)),
                     ' '],
         ['Project Elevation', 
-        ' ', ' ', str(baspt[2]),
-        str(convert_units(document, (survpt[2] - baspt[2])))]]
+            ' ', ' ', str(convert_values(baspt[2], doc)),
+            str(convert_units((survpt[2] - baspt[2]), document))]]
     # Print Table
     output.print_table(table_data=tbdata, 
                     title='Project Coordinates and Distances',
