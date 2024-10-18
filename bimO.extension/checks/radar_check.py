@@ -18,11 +18,11 @@ clr.AddReference('RevitAPI')
 from Autodesk.Revit.DB import *
 
 #pyRevit
-from pyrevit import revit, DB, DOCS, HOST_APP
+from pyrevit import DB, DOCS, HOST_APP
 from pyrevit import script
-from pyrevit import forms
+from pyrevit.revit import units
 from pyrevit.preflight import PreflightTestCase
-
+# from pyrevit import forms
 #______________________________________________Global Variables
 doc    = DOCS.doc #type:Document
 intOrig = (0,0,0)
@@ -111,7 +111,6 @@ def convert_units(doc, distance):
                                             value=distance,
                                             forEditing=False)
 
-
     else:
         UIunits = DB.UnitFormatUtils(units=doc.GetUnits(),
                                      unitType=DB.UnitType.UT_Length,
@@ -129,9 +128,9 @@ def calculate_Horizontal_Distance(point1, point2):
     x2, y2, z2 = point2
 
     # Calculate the distance using the Euclidean distance formula
-    distance = math.sqrt((x2 - x1)**2 + (y2 - y1)**2 )
-    deltaX = (x2 - x1)
-    deltaY = (y2 - y1)
+    distance = abs(math.sqrt((x2 - x1)**2 + (y2 - y1)**2 ))
+    deltaX = abs(x2 - x1)
+    deltaY = abs(y2 - y1)
 
     return distance, deltaX, deltaY
 
@@ -185,7 +184,7 @@ def check_model_extents(doc, output):
     stringseperator = "_________________________________________________________________________________________________"
     TestScore = 0
     #__________________________________________check the distnaces of base and survey points
-    output.print_html('<cover>__________:satellite_antenna:__10-Mile Radar___________</cover>')
+    output.print_html('<cover>_________:satellite_antenna:__10-Mile Radar___________</cover>')
     print(stringseperator)
     print("")
     
@@ -221,6 +220,7 @@ def check_model_extents(doc, output):
 
     #__________________________________________Get the bounding box of the 3D view
     print("")
+    print(stringseperator)
     output.print_md('# Checking the extents of the 3D view bounding box')
     bbox_instance = Get3DViewBoundingBox()
     bbox = bbox_instance.get_tempbbox(0,0,0,0)[0]
@@ -270,7 +270,7 @@ def check_model_extents(doc, output):
                 print(output.linkify(y.Id)+ str(y.Name)+ " - Is part of design option - "+ str(y.DesignOption.Name) )
                 counter += 1
     else:
-        output.print_md('### :OK_hand_medium_skin_tone: ............No object in any design option is located more than 10 miles (16KM) away from the Internal Origin.***')
+        output.print_md('### :OK_hand_medium_skin_tone: ............All objects design options are located within 10 miles (16KM) away from the Internal Origin.***')
         TestScore += 1
     #__________________________________________Check Test Score
     if TestScore >= 2:
