@@ -138,7 +138,7 @@ def calculate_distance(point1, point2):
     x2, y2, z2 = point2
     # Calculate the distance using the Euclidean distance formula
     distance =( #rounded to the nearest inch
-        round(math.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2) * 12) / 12)
+        math.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2))
     return distance
 
 
@@ -148,8 +148,8 @@ def calculate_horizontal_distance(point1, point2):
     x1, y1, z1 = point1
     x2, y2, z2 = point2
     # Calculate the distance using the Euclidean distance formula
-    distance = (# Rounded to the nearest inch
-        round(math.sqrt((x2 - x1)**2 + (y2 - y1)**2) * 12) / 12)
+    distance = (
+        math.sqrt((x2 - x1)**2 + (y2 - y1)**2))
     delta_x = (x2 - x1)
     delta_y = (y2 - y1)
     return distance, delta_x, delta_y
@@ -189,14 +189,14 @@ def check_bounding_box(bbox, intorig, extentdistance):
 def get_project_base_and_survey_pts(document=doc):
     base_point = DB.BasePoint.GetProjectBasePoint(document).Position
     base_point_coordinates = (
-                                int(base_point.X),
-                                int(base_point.Y),
-                                int(base_point.Z))
+                                base_point.X,
+                                base_point.Y,
+                                base_point.Z)
     survey_point = DB.BasePoint.GetSurveyPoint(document).Position
     survey_point_coordinates = (
-                                int(survey_point.X),
-                                int(survey_point.Y),
-                                int(survey_point.Z))
+                                survey_point.X,
+                                survey_point.Y,
+                                survey_point.Z)
     return base_point_coordinates, survey_point_coordinates, INTERNAL_ORIGIN
 
 
