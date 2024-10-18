@@ -17,7 +17,6 @@ GOOD_STRG = '### :OK_hand_medium_skin_tone: ............'
 WARN_STRG = '### :warning: ............'
 CRITERIA_STRG = '10 Mi (16KM) away from the Internal Origin.'
 
-
 # ___________________________________________________3D to Bounding Box Analysis
 class Get3DViewBoundingBox():
     def get_tempbbox(self, toggle_cads, toggle_rvts, toggle_ifcs, toggle_all):
@@ -103,12 +102,15 @@ class Get3DViewBoundingBox():
                             bad_elements.append(element)
         return bb, bad_cads, bad_rvts, bbh, bad_elements
 
+
 # ___________________________________________________________ Convert values
 def convert_values(value, document=doc):
     if HOST_APP.is_newer_than(2021):
-        ui_units = document.GetUnits().GetFormatOptions(DB.SpecTypeId.Length).GetUnitTypeId()
+        ui_units = (document.GetUnits().GetFormatOptions(DB.SpecTypeId.Length)
+                    .GetUnitTypeId())
     else:
-        ui_units = document.GetUnits().GetFormatOptions(DB.UnitType.UT_Length).DisplayUnits
+        ui_units = (document.GetUnits().GetFormatOptions(DB.UnitType.UT_Length)
+                    .DisplayUnits)
 
     ui_values = DB.UnitUtils.ConvertFromInternalUnits(value, ui_units)
     return ui_values
@@ -138,6 +140,7 @@ def calculate_distance(point1, point2):
     distance =( #rounded to the nearest inch
         round(math.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2) * 12) / 12)
     return distance
+
 
 # ________________________________________________ Calculate Horizontal Distance
 def calculate_horizontal_distance(point1, point2):
@@ -196,11 +199,13 @@ def get_project_base_and_survey_pts(document=doc):
                                 int(survey_point.Z))
     return base_point_coordinates, survey_point_coordinates, INTERNAL_ORIGIN
 
+
 # _______________________________________________________________Get Model Units
 def get_model_units_type(document=doc):
     unitsystem = document.DisplayUnitSystem
     return unitsystem
-                                        
+
+
 # _________________________________________________ Get Design Options & Objects
 def get_design_options_elements(document=doc):
     design_option_elements = []
@@ -219,6 +224,7 @@ def get_design_options_elements(document=doc):
                 ToElements())
         design_option_elements.append(x)
     return design_options, design_option_elements, design_option_sets
+
 
 # ______________________________________________________________________________
 # ________________________________________________________________ MAIN FUNCTION
