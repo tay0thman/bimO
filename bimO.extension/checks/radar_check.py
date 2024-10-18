@@ -5,7 +5,6 @@
 import math
 # pyRevit
 from pyrevit import revit, DB, DOCS, HOST_APP
-from pyrevit.revit import units
 from pyrevit import script
 from pyrevit.preflight import PreflightTestCase
 
