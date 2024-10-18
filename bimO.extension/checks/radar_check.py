@@ -5,16 +5,19 @@
 import math
 # pyRevit
 from pyrevit import revit, DB, DOCS, HOST_APP
+from pyrevit.revit import units
 from pyrevit import script
 from pyrevit.preflight import PreflightTestCase
 
 # ______________________________________________________________Global Variables
-doc = DOCS.doc  #type:Document
+doc = DOCS.doc  # Current Document
 INTERNAL_ORIGIN = (0, 0, 0)
 EXTENT_DISTANCE = 52800  # Linear Feet
 BAD_STRG = '### :thumbs_down_medium_skin_tone: ............'
 GOOD_STRG = '### :OK_hand_medium_skin_tone: ............'
 WARN_STRG = '### :warning: ............'
+CRITERIA_STRG = '10 Mi (16KM) away from the Internal Origin.'
+
 
 # ___________________________________________________3D to Bounding Box Analysis
 class Get3DViewBoundingBox():
@@ -107,7 +110,8 @@ def calculate_distance(point1, point2):
     x1, y1, z1 = point1
     x2, y2, z2 = point2
     # Calculate the distance using the Euclidean distance formula
-    distance = math.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2)
+    distance =( #rounded to the nearest inch
+        round(math.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2) * 12) / 12)
     return distance
 
 
@@ -116,12 +120,12 @@ def convert_units(doc, distance):
         ui_units = DB.UnitFormatUtils.Format(units=doc.GetUnits(),
                                             specTypeId=DB.SpecTypeId.Length,
                                             value=distance,
-                                            forEditing=False)
+                                            forEditing=True)
     else:
         ui_units = DB.UnitFormatUtils.Format(units=doc.GetUnits(),
                                              unitType=DB.UnitType.UT_Length, 
                                              value=distance, maxAccuracy=False, 
-                                             forEditing=False)
+                                             forEditing=True)
     return ui_units
 
 
@@ -131,10 +135,21 @@ def calculate_horizontal_distance(point1, point2):
     x1, y1, z1 = point1
     x2, y2, z2 = point2
     # Calculate the distance using the Euclidean distance formula
-    distance = math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+    distance = (# Rounded to the nearest inch
+        round(math.sqrt((x2 - x1)**2 + (y2 - y1)**2) * 12) / 12)
     delta_x = (x2 - x1)
     delta_y = (y2 - y1)
     return distance, delta_x, delta_y
+
+
+# ______________________________________________Calculate Angle Between 2 Points
+def calculate_angle(point1, point2):
+    # Unpack the tuples
+    x1, y1, z1 = point1
+    x2, y2, z2 = point2
+    # Calculate the angle using the arctangent function
+    angle = round(math.degrees(math.atan2(y2 - y1, x2 - x1)), 2)
+    return angle
 
 
 # _____________________________________________________________ Get Bounding Box
@@ -160,83 +175,115 @@ def check_bounding_box(bbox, intorig, extentdistance):
 # ____________________________________________ Get ProjectBase and Survey Points
 def get_project_base_and_survey_pts(document=doc):
     base_point = DB.BasePoint.GetProjectBasePoint(document).Position
-    base_point_coordinates = (base_point.X, base_point.Y, base_point.Z)
+    base_point_coordinates = (int(base_point.X),
+                              int(base_point.Y),
+                              int(base_point.Z))
     survey_point = DB.BasePoint.GetSurveyPoint(document).Position
-    survey_point_coordinates = (survey_point.X, survey_point.Y, survey_point.Z)
+    survey_point_coordinates = (
+                                int(survey_point.X),
+                                int(survey_point.Y),
+                                int(survey_point.Z))
     return base_point_coordinates, survey_point_coordinates, INTERNAL_ORIGIN
 
-
+# _______________________________________________________________Get Model Units
+def get_model_units_type(document=doc):
+    unitsystem = document.DisplayUnitSystem
+    return unitsystem
+                                        
 # _________________________________________________ Get Design Options & Objects
 def get_design_options_elements(document=doc):
     design_option_elements = []
+    design_option_sets = []
     design_options = (DB.FilteredElementCollector(document).
                         OfClass(DB.DesignOption).
                         ToElements())
+
     for do in design_options:
+        option_set_param = DB.BuiltInParameter.OPTION_SET_ID
+        option_set_id = do.get_Parameter(option_set_param).AsElementId()
+        design_option_sets.append(option_set_id)
         design_option_filter = DB.ElementDesignOptionFilter(do.Id)
         x = (DB.FilteredElementCollector(document).
                 WherePasses(design_option_filter).
                 ToElements())
         design_option_elements.append(x)
-    return design_options, design_option_elements
-
+    return design_options, design_option_elements, design_option_sets
 
 # ______________________________________________________________________________
 # ________________________________________________________________ MAIN FUNCTION
 # ______________________________________________________________________________
 def check_model_extents(document=doc):
-    # ______________________________________________HTML Styles
+    unit_system = get_model_units_type(document=doc)
+    # _______________________________________________________________HTML Styles
     output = script.get_output()
     output.add_style('cover {color:black; font-size:24pt; font-weight:bold;}')
     output.add_style('header {color:black; font-size:15pt;}')
     divider = "_"*100
     test_score = 0
-    # _____________________________Check the distances of base and survey points
     output.print_html(
      ('<cover>__________:satellite_antenna:__10-Mile Radar___________</cover>'))
     print(divider)
     print("")
     output.print_md('# Checking model placement and coordinates')
     print(divider)
+    # _____________________________Check the distances of base and survey points
     baspt, survpt, INTERNAL_ORIGIN = get_project_base_and_survey_pts(document)
     basptdistance = abs(calculate_distance(baspt, INTERNAL_ORIGIN))
     surveydistance = abs(calculate_distance(survpt, INTERNAL_ORIGIN))
     if basptdistance > EXTENT_DISTANCE:
         output.print_md(BAD_STRG + 
-        'Base Point is more than 10 Mi (16KM) away from the Internal Origin.')
+        'Base Point is more than ' + CRITERIA_STRG)
     if surveydistance > EXTENT_DISTANCE:
         output.print_md(BAD_STRG + 
-        'Survey Point is more than 10 Mi (16KM) away from the Internal Origin.')
+        'Survey Point is more than ' + CRITERIA_STRG)
     else:
         output.print_md(GOOD_STRG + 
-        'Survey Point is less than 10 Mi (16KM) away from the Internal Origin.')
+        'Survey Point is less than ' + CRITERIA_STRG)
     basptdistance = calculate_distance(baspt, INTERNAL_ORIGIN)
+    # ____________________________________Calculate the angle between the points
+    baseptangle = calculate_angle(baspt, INTERNAL_ORIGIN)
+    surveyptangle = calculate_angle(survpt, INTERNAL_ORIGIN)
+    truenorthangle = calculate_angle(baspt, survpt)
+    # _______________________________Print the Project Coordinates and Distances
     tbdata = [['Internal Origin Coordinates', 
-            str(INTERNAL_ORIGIN)],
-            ['Project Base Point Coordinates', 
-            str(baspt)],
-            ['Survey Point Coordinates', 
-            str(survpt)],
-            ['Project Base Point Distance from Internal Origin', 
-            str(convert_units(document, basptdistance))],
-            ['Survey Point Distance from Internal Origin', 
-            str(convert_units(document, surveydistance))],
-            ['Project Base Point to Survey Delta X', 
-            str(convert_units(document, 
-                    calculate_horizontal_distance(baspt, survpt)[1]))],
-            ['Project Base Point to Survey Delta Y', 
-            str(convert_units(document, 
-                    calculate_horizontal_distance(baspt, survpt)[2]))],
-            ['Horizontal Distance between Project Base Point and Survey Point', 
-            str(convert_units(document, 
-                    calculate_horizontal_distance(baspt, survpt)[0]))],
-            ['Project Elevation', 
-            str(convert_units(document, (survpt[2] - baspt[2])))]]
+        str(INTERNAL_ORIGIN[0]),str(INTERNAL_ORIGIN[1]),str(INTERNAL_ORIGIN[2]),
+        ' ', ' '],
+        ['Project Base Point Coordinates to Internal Origin', 
+        str(baspt[0]),str(baspt[1]),str(baspt[2]), 
+        str(convert_units(document, basptdistance)), baseptangle],
+        ['Survey Point Coordinates to Internal Origin', 
+        str(survpt[0],),str(survpt[1],),str(survpt[2]),
+        str(convert_units(document, surveydistance)), surveyptangle],
+        ['Project Base Point to Survey Delta X', ' ', ' ', ' ',
+        str(convert_units(document, 
+                calculate_horizontal_distance(baspt, survpt)[1]))],
+        ['Project Base Point to Survey Delta Y', ' ', ' ', ' ',
+        str(convert_units(document, 
+                calculate_horizontal_distance(baspt, survpt)[2]))],
+        ['Planar Distance between Base Point and Survey Point',
+        ' ', ' ', ' ', 
+        str(convert_units(document, 
+                calculate_horizontal_distance(baspt, survpt)[0])),
+                truenorthangle],
+        ['Total Distance between Base Point and Survey Point',
+        ' ', ' ', ' ',
+        str(convert_units(document, 
+                    calculate_distance(baspt, survpt))),
+                    ' '],
+        ['Project Elevation', 
+        ' ', ' ', str(baspt[2]),
+        str(convert_units(document, (survpt[2] - baspt[2])))]]
     # Print Table
     output.print_table(table_data=tbdata, 
-                       title='Project Coordinates and Distances',
-                       columns=['Coordinates', 'Values'],
-                       formats=['', ''])
+                    title='Project Coordinates and Distances',
+                    columns=
+                        ['Coordinates',
+                           ' X  ',
+                           '     Y  ',
+                          '     Z       ',
+                          '            Distance (' + str(unit_system) + ')  ',
+                          '  ANGLE (°)  '],
+                    formats=['', '' , '', '', '', ''])
     # _______________________________________Get the bounding box of the 3D view
     print("")
     output.print_md('# Checking the extents of the 3D view bounding box')
@@ -250,10 +297,10 @@ def check_model_extents(document=doc):
     if (calculate_distance(min, INTERNAL_ORIGIN) > EXTENT_DISTANCE or 
         calculate_distance(max, INTERNAL_ORIGIN) > EXTENT_DISTANCE):
         output.print_md(BAD_STRG + 
-        '3D View Bounding Box extends more than 10 Mi (16KM) away from the Internal Origin.')
+        '3D View Bounding Box extends more than ' + CRITERIA_STRG)
     else:
         output.print_md(GOOD_STRG + 
-        '3D View Bounding Box is located less than 10 Mi (16KM) away from the Internal Origin.')
+        '3D View Bounding Box is located less than ' + CRITERIA_STRG)
         test_score += 1
     # _____________________________________________Get Objects in Design Options
     print("")
@@ -263,6 +310,9 @@ def check_model_extents(document=doc):
     design_option_objects = get_design_options_elements(document)
     violating_design_option_objects = []
     violating_options = []
+    violating_option_sets = []
+    option_set_param = DB.BuiltInParameter.OPTION_SET_ID
+    
     for x in design_option_objects[1]:
         for y in x:
             dbbox = y.get_BoundingBox(None)
@@ -274,30 +324,39 @@ def check_model_extents(document=doc):
                 if (calculate_distance(dbmin, INTERNAL_ORIGIN) > EXTENT_DISTANCE
                 or 
                 calculate_distance(dbmax, INTERNAL_ORIGIN) > EXTENT_DISTANCE):
-                    violating_design_option_objects.append(x)
+                    violating_design_option_objects.append(y)
                     if y.DesignOption.Name not in violating_options:
-                        violating_options.append(y.DesignOption.Name)
+                        violating_options.append(y.DesignOption)
+                        violating_option_sets.append(
+                                                y.DesignOption.
+                                                get_Parameter(option_set_param).
+                                                AsElementId())
     if len(violating_design_option_objects) > 0:
         output.print_md(BAD_STRG + 
-        'Design Option Objects are located more than 10 Mi (16KM) away from the Internal Origin.')
+        'Design Option Objects are located more than ' + CRITERIA_STRG)
         if len(violating_design_option_objects) > 10:
-            output.print_md('WARN_STRGShowing the first 10 objects')
-            output.print_md('WARN_STRGManual investigation is required')
+            output.print_md(WARN_STRG + 'Showing the first 10 objects')
+            output.print_md(WARN_STRG + 'Manual investigation is required')
         counter = 0
         limit = 10
         for x in violating_design_option_objects:
+            if counter > limit:
+                break
+            else:
+                    setid = violating_option_sets[counter]
+                    print(output.linkify(x.Id) + 
+                            "   " +
+                            str(x.Name) +
+                            " - Is part of " +
+                            str(doc.GetElement(setid).Name) +
+                            " - " +
+                            str(x.DesignOption.Name)
+                            )
+                    counter += 1
 
-            for y in x:
-                if counter == limit:
-                    break
-                print(output.linkify(y.Id) + 
-                            str(y.Name) +
-                            " - Is part of design option - "
-                            + str(y.DesignOption.Name))
-                counter += 1
     else:
         output.print_md(GOOD_STRG + 
-        'No object in any design option is located more than 10 Mi (16KM) away from the Internal Origin.')
+        'No object in any design option is located more than ' + CRITERIA_STRG)
         test_score += 1
     # __________________________________________________________Check Test Score
     if test_score >= 2:
@@ -334,7 +393,7 @@ def check_model_extents(document=doc):
             counter += 1
     else:
         output.print_md(GOOD_STRG +
-        'All CAD and RVT Links are located less than 10 Mi (16KM) away from the Internal Origin.')
+        'All CAD and RVT Links are located less than ' + CRITERIA_STRG)
         test_score += 1
         print(divider)
     if check_bounding_box(cleanbbox, INTERNAL_ORIGIN, 5) == 0:
@@ -344,7 +403,7 @@ def check_model_extents(document=doc):
         'Further Analysis Required.')
     else:
         output.print_md(GOOD_STRG + 
-        'All Objects are located less than 10 Mi (16KM) away from the Internal Origin.')
+        'All Objects are located less than ' + CRITERIA_STRG)
         script.exit()
     print(divider)
     output.print_md('# Checking everything, It is going to take a while.')
@@ -362,7 +421,7 @@ def check_model_extents(document=doc):
             output.print_md(WARN_STRG + 
             'Manual investigation is required')
         output.print_md(BAD_STRG + 
-        'Elements below are located more than 10 Mi (16KM) away from the Internal Origin')
+        'Elements below are located more than ' + CRITERIA_STRG)
         for x in badelements:
             print(output.linkify(x.Id)+ '  ' + 
                     str(x.Name) + '  ' + str(x.Category.Name))
@@ -371,7 +430,7 @@ def check_model_extents(document=doc):
             counter += 1
     else:
         output.print_md(GOOD_STRG + 
-        'All Objects are located less than 10 Mi (16KM) away from the Internal Origin.')
+        'All Objects are located less than ' + CRITERIA_STRG)
         test_score += 1
 
 
