@@ -3,7 +3,15 @@
 # ______________________________________________________________________Imports
 # General Imports
 import math
-# pyRevit
+
+#.NET Imports
+import clr
+clr.AddReference('System')
+from System.Collections.Generic import List
+clr.AddReference('RevitAPI')
+from Autodesk.Revit.DB import *
+
+#pyRevit
 from pyrevit import revit, DB, DOCS, HOST_APP
 from pyrevit import script
 from pyrevit.preflight import PreflightTestCase
@@ -112,6 +120,7 @@ def calculate_distance(point1, point2):
 
 
 def convert_units(doc, distance):
+
     if HOST_APP.is_newer_than(2021):
         ui_units = DB.UnitFormatUtils.Format(units=doc.GetUnits(),
                                             specTypeId=DB.SpecTypeId.Length,
@@ -173,19 +182,19 @@ def get_design_options_elements(document=doc):
                         OfClass(DB.DesignOption).
                         ToElements())
     for do in design_options:
-        design_option_filter = DB.ElementDesignOptionFilter(do.Id)
-        x = (DB.FilteredElementCollector(document).
-                WherePasses(design_option_filter).
-                ToElements())
-        design_option_elements.append(x)
-    return design_options, design_option_elements
+        do_filter = ElementDesignOptionFilter(do.Id)
+        x = FilteredElementCollector(doc).WherePasses(do_filter).ToElements()
+        dbobjs.append(x)
 
+    return design_options, dbobjs
 
-# ______________________________________________________________________________
-# ________________________________________________________________ MAIN FUNCTION
-# ______________________________________________________________________________
-def check_model_extents(document=doc):
-    # ______________________________________________HTML Styles
+#__________________________________________________________
+#____________________________________________ MAIN FUNCTION
+#__________________________________________________________
+
+def check_model_extents(doc, output):
+    #______________________________________________HTML Styles
+
     output = script.get_output()
     output.add_style('cover {color:black; font-size:24pt; font-weight:bold;}')
     output.add_style('header {color:black; font-size:15pt;}')
