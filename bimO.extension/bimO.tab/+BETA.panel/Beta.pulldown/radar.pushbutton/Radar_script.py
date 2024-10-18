@@ -1,7 +1,8 @@
-# -*- coding: utf-8 -*-
+pyRevit# -*- coding: utf-8 -*-
 
 # ______________________________________________________________________Imports
 # General Imports
+# import sys
 import math
 # pyRevit
 from pyrevit import revit, DB, DOCS, HOST_APP
@@ -49,7 +50,7 @@ class Get3DViewBoundingBox():
                         cadbox = cad.get_BoundingBox(None)
                         cadmin = (cadbox.Min.X, cadbox.Min.Y, cadbox.Min.Z)
                         cadmax = (cadbox.Max.X, cadbox.Max.Y, cadbox.Max.Z)
-                        if (calculate_distance(
+                        if calculate_distance((
                             cadmin, INTERNAL_ORIGIN) > EXTENT_DISTANCE or
                             calculate_distance(cadmax, INTERNAL_ORIGIN) >
                              EXTENT_DISTANCE):
@@ -149,8 +150,8 @@ def get_bounding_box(view):
 def check_bounding_box(bbox, intorig, extentdistance):
     min = (bbox.Min.X, bbox.Min.Y, bbox.Min.Z)
     max = (bbox.Max.X, bbox.Max.Y, bbox.Max.Z)
-    if (calculate_distance(min, intorig) > extentdistance or 
-        calculate_distance(max, intorig) > extentdistance):
+    if calculate_distance((min, intorig) > extentdistance or 
+                            calculate_distance(max, intorig) > extentdistance):
         Status = 0
     else:
         Status = 1
@@ -202,13 +203,13 @@ def check_model_extents(document=doc):
     basptdistance = abs(calculate_distance(baspt, INTERNAL_ORIGIN))
     surveydistance = abs(calculate_distance(survpt, INTERNAL_ORIGIN))
     if basptdistance > EXTENT_DISTANCE:
-        output.print_md(BAD_STRG + 
+        output.print_md('BAD_STRG' + 
         'Base Point is more than 10 Mi (16KM) away from the Internal Origin.')
     if surveydistance > EXTENT_DISTANCE:
-        output.print_md(BAD_STRG + 
+        output.print_md('BAD_STRG' + 
         'Survey Point is more than 10 Mi (16KM) away from the Internal Origin.')
     else:
-        output.print_md(GOOD_STRG + 
+        output.print_md('GOOD_STRG' + 
         'Survey Point is less than 10 Mi (16KM) away from the Internal Origin.')
     basptdistance = calculate_distance(baspt, INTERNAL_ORIGIN)
     tbdata = [['Internal Origin Coordinates', 
@@ -247,12 +248,12 @@ def check_model_extents(document=doc):
     print("")
     print(divider)
     print("")
-    if (calculate_distance(min, INTERNAL_ORIGIN) > EXTENT_DISTANCE or 
+    if calculate_distance((min, INTERNAL_ORIGIN) > EXTENT_DISTANCE or 
         calculate_distance(max, INTERNAL_ORIGIN) > EXTENT_DISTANCE):
-        output.print_md(BAD_STRG + 
+        output.print_md('BAD_STRG' + 
         '3D View Bounding Box extends more than 10 Mi (16KM) away from the Internal Origin.')
     else:
-        output.print_md(GOOD_STRG + 
+        output.print_md('GOOD_STRG' + 
         '3D View Bounding Box is located less than 10 Mi (16KM) away from the Internal Origin.')
         test_score += 1
     # _____________________________________________Get Objects in Design Options
@@ -271,14 +272,15 @@ def check_model_extents(document=doc):
             else:
                 dbmin = (dbbox.Min.X, dbbox.Min.Y, dbbox.Min.Z)
                 dbmax = (dbbox.Max.X, dbbox.Max.Y, dbbox.Max.Z)
-                if (calculate_distance(dbmin, INTERNAL_ORIGIN) > EXTENT_DISTANCE
-                or 
-                calculate_distance(dbmax, INTERNAL_ORIGIN) > EXTENT_DISTANCE):
+                if calculate_distance(
+                    (dbmin, INTERNAL_ORIGIN) > EXTENT_DISTANCE or 
+                    calculate_distance(
+                        dbmax, INTERNAL_ORIGIN) > EXTENT_DISTANCE):
                     violating_design_option_objects.append(x)
                     if y.DesignOption.Name not in violating_options:
                         violating_options.append(y.DesignOption.Name)
     if len(violating_design_option_objects) > 0:
-        output.print_md(BAD_STRG + 
+        output.print_md('BAD_STRG' + 
         'Design Option Objects are located more than 10 Mi (16KM) away from the Internal Origin.')
         if len(violating_design_option_objects) > 10:
             output.print_md('WARN_STRGShowing the first 10 objects')
@@ -296,7 +298,7 @@ def check_model_extents(document=doc):
                             + str(y.DesignOption.Name))
                 counter += 1
     else:
-        output.print_md(GOOD_STRG + 
+        output.print_md('GOOD_STRG' + 
         'No object in any design option is located more than 10 Mi (16KM) away from the Internal Origin.')
         test_score += 1
     # __________________________________________________________Check Test Score
@@ -304,7 +306,7 @@ def check_model_extents(document=doc):
         output.print_md('GOOD_STRGAll Tests Passed.')
         script.exit()
     else:
-        output.print_md(BAD_STRG + 
+        output.print_md('BAD_STRG' + 
         'Distant objects detected, Proceeding with additional analysis')
     # ___________________________________________________Check CAD and RVT Links
     print(divider)
@@ -333,17 +335,17 @@ def check_model_extents(document=doc):
                 break
             counter += 1
     else:
-        output.print_md(GOOD_STRG +
+        output.print_md('GOOD_STRG' +
         'All CAD and RVT Links are located less than 10 Mi (16KM) away from the Internal Origin.')
         test_score += 1
         print(divider)
     if check_bounding_box(cleanbbox, INTERNAL_ORIGIN, 5) == 0:
-        output.print_md(BAD_STRG + 
+        output.print_md('BAD_STRG' + 
         'Distant objects are still being detected!')
-        output.print_md(WARN_STRG + 
+        output.print_md('WARN_STRG' + 
         'Further Analysis Required.')
     else:
-        output.print_md(GOOD_STRG + 
+        output.print_md('GOOD_STRG' + 
         'All Objects are located less than 10 Mi (16KM) away from the Internal Origin.')
         script.exit()
     print(divider)
@@ -357,11 +359,11 @@ def check_model_extents(document=doc):
     limit = 10
     if len(badelements) > 0:
         if len(badelements) > limit:
-            output.print_md(WARN_STRG + 
+            output.print_md('WARN_STRG' + 
             'Showing the first 10 objects')
-            output.print_md(WARN_STRG + 
+            output.print_md('WARN_STRG' + 
             'Manual investigation is required')
-        output.print_md(BAD_STRG + 
+        output.print_md('BAD_STRG' + 
         'Elements below are located more than 10 Mi (16KM) away from the Internal Origin')
         for x in badelements:
             print(output.linkify(x.Id)+ '  ' + 
@@ -370,7 +372,7 @@ def check_model_extents(document=doc):
                 break
             counter += 1
     else:
-        output.print_md(GOOD_STRG + 
+        output.print_md('GOOD_STRG' + 
         'All Objects are located less than 10 Mi (16KM) away from the Internal Origin.')
         test_score += 1
 
