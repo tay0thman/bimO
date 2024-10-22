@@ -64,6 +64,7 @@ z = forms.ask_for_number_slider( default=0, interval=1, min=-100, max=100,
                                 prompt='Enter the translation value in feet',
                                 title='Z Translation')
 
+#______________________________________________________________Main Transaction
 with revit.Transaction('Move View Origin'):
     for view in selected_views:
                 # Activate crop box
@@ -83,7 +84,7 @@ with revit.Transaction('Move View Origin'):
         view.CropBoxActive = True
 
 
-        # move filled regions
+        # <Likely not needed> move filled regions
 
         # col1 = (DB.FilteredElementCollector(doc, view.Id)
         #                                         .OfClass(DB.FilledRegion)
