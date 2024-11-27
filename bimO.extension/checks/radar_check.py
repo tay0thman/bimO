@@ -50,7 +50,8 @@ def make_temp_view(document=doc):
                      .WhereElementIsElementType()
                      .ToElements())
     three_d_view_type = next(
-        v for v in view_3D_types if v.ViewFamily == DB.ViewFamily.ThreeDimensional
+        v for v in view_3D_types 
+        if v.ViewFamily == DB.ViewFamily.ThreeDimensional
             )
     
     view = DB.View3D.CreateIsometric(document, three_d_view_type.Id)
@@ -137,6 +138,7 @@ def get_far_elements(document=doc, cad=False, rvt=False):
         bad_elements (list): A list of elements that are more than 10 miles
         from the internal origin.
         """
+    # region determine elements to check
     bad_elements = []
     temp_view = make_temp_view(document)
     if cad:
@@ -153,6 +155,8 @@ def get_far_elements(document=doc, cad=False, rvt=False):
         elementsids = (DB.FilteredElementCollector(document, temp_view.Id).
                         WhereElementIsNotElementType().
                         ToElementIds())
+    # endregion
+    # region Check Bounding Box and report bad elements
     for elementid in elementsids:
         element = document.GetElement(elementid)
         if ((element.get_BoundingBox(temp_view)) 
@@ -167,9 +171,26 @@ def get_far_elements(document=doc, cad=False, rvt=False):
             if (check_bounding_box(bbox, INTERNAL_ORIGIN, EXTENT_DISTANCE)
                     == 0):
                 bad_elements.append(element)
+    # endregion
     return bad_elements
 
-def convert_values(value, document=doc):
+def report_point(message, point, distance, document=doc, distance_only=False):
+    """
+    Reports the coordinates, distance and angle between a point and the 
+    internal origin.
+    Args:
+        message (str): The message to display.
+        point (tuple): The coordinates of the point.
+        distance (float): The distance between the point and internal origin.
+        document (Document): The document object containing unit settings.
+    Returns:
+        tuple: The message, the point coordinates, the distance, and the angle.
+    """
+    angle = calculate_angle(point, INTERNAL_ORIGIN)
+    return (message, " " if distance_only else convert_values(document, point), 
+            convert_units(distance, document), " " if distance_only else angle)
+
+def convert_values(document=doc, *values):
     """
     Converts internal units to display units.
     Args:
@@ -186,11 +207,12 @@ def convert_values(value, document=doc):
         ui_units = (document.GetUnits().GetFormatOptions(DB.UnitType.UT_Length)
                     .DisplayUnits)
 
-    ui_values = DB.UnitUtils.ConvertFromInternalUnits(value, ui_units)
-    ui_values = round(ui_values, 3)
-    ui_values = str(ui_values).rstrip('0').rstrip('.')
-    return ui_values
-
+    return [
+        "{:.2f}".format(DB.UnitUtils.ConvertFromInternalUnits(val, ui_units))
+        for value in values for val in (
+            value if isinstance(value, tuple) else (value,))
+    ]
+    
 def convert_units(distance, document=doc):
     """
     Converts internal units to display units.
@@ -221,34 +243,41 @@ def calculate_distance(point1, point2):
         point2 (tuple): The coordinates of the second point.
     Returns:
         distance (float): The distance between the two points."""
-    # Unpack the tuples
     x1, y1, z1 = point1
     x2, y2, z2 = point2
-    # Calculate the distance using the Euclidean distance formula
     distance =( #rounded to the nearest inch
         math.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2))
     return distance
 
 def calculate_horizontal_distance(point1, point2):
-    """Calculates the horizontal distance between two points."""
+    """Calculates the horizontal distance between two points.
+    Args:
+        point1 (tuple): The coordinates of the first point.
+        point2 (tuple): The coordinates of the second point.
+    Returns:
+        distance (float): The horizontal distance between the two points."""
     x1, y1, z1 = point1
     x2, y2, z2 = point2
     distance = math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
     return distance
 
-def calculate_delta_x(point1, point2):
-    """Calculates the delta X between two points."""
+def calculate_delta(point1, point2, delta='x'):
+    """Calculates the delta X, Y or Z between two points.
+    Args:
+        point1 (tuple): The coordinates of the first point.
+        point2 (tuple): The coordinates of the second point.
+        delta (str): The axis to calculate the delta for.
+        Returns:
+        delta (float): The delta between the two points."""
     x1, y1, z1 = point1
     x2, y2, z2 = point2
-    delta_x = x2 - x1
-    return delta_x
-
-def calculate_delta_y(point1, point2):
-    """Calculates the delta Y between two points."""
-    x1, y1, z1 = point1
-    x2, y2, z2 = point2
-    delta_y = y2 - y1
-    return delta_y
+    if delta == 'x':
+        delta = abs(x2 - x1)
+    elif delta == 'y':
+        delta = abs(y2 - y1)
+    elif delta == 'z':
+        delta = abs(z2 - z1)
+    return delta
 
 def calculate_angle(point1, point2):
     """
@@ -271,7 +300,7 @@ def points_distances_angles(point):
     Args:
         point (tuple): The coordinates of the point.
     Returns:
-        distances (tuple): The distances between the internal origin and the point.
+        distances (tuple): The distances between  internal origin and the point.
         angles (tuple): The angles between the internal origin and the point.
         x (string): The unit conversion value x-coordinate of the point.
         y (string): The unit conversion value y-coordinate of the point.
@@ -310,7 +339,7 @@ def get_project_base_and_survey_pts(document=doc):
     Args:
         doc (Document): The current document.
     Returns:
-        base_point_coordinates (tuple): The coordinates of the project base point.
+        base_point_coordinates (tuple): The coordinates of  project base point.
         survey_point_coordinates (tuple): The coordinates of the survey point.
     """
     base_point = DB.BasePoint.GetProjectBasePoint(document).Position
@@ -372,76 +401,65 @@ def check_model_coordinates(document=doc):
         None
     """
     unit_system = get_model_units_type(document=doc)
-    # _______________________________________________________________HTML Styles
+    # region HTML Styling
     output = script.get_output()
     output.add_style('cover {color:black; font-size:24pt; font-weight:bold;}')
     output.add_style('header {color:black; font-size:15pt;}')
+    # endregion
+    # region Print Header
     output.print_html(
     ('<cover>__________:satellite_antenna:__10-Mile Radar___________</cover>'))
     print(divider)
     print("")
     output.print_md('# Checking model placement and coordinates')
     print(divider)
-    # _____________________________Check the distances of base and survey points
+    # endregion
+    # region Check the distances of base and survey points
     baspt, survpt = get_project_base_and_survey_pts(document)
     basptdistance = abs(calculate_distance(baspt, INTERNAL_ORIGIN))
     surveydistance = abs(calculate_distance(survpt, INTERNAL_ORIGIN))
-
     if abs(basptdistance > EXTENT_DISTANCE):
-        output.print_md('{} Base Point is more than {}'.format(BAD_STRG, CRITERIA_STRG))
+        output.print_md('{} Base Point is more than {}'.
+                        format(BAD_STRG, CRITERIA_STRG))
     if abs(surveydistance > EXTENT_DISTANCE):
-        output.print_md('{} Survey Point is more than {}'.format(BAD_STRG, CRITERIA_STRG))
+        output.print_md('{} Survey Point is more than {}'.
+                        format(BAD_STRG, CRITERIA_STRG))
     else:
-        output.print_md('{} Survey Point is less than {}'.format(GOOD_STRG, CRITERIA_STRG))
+        output.print_md('{} Survey Point is less than {}'.
+                        format(GOOD_STRG, CRITERIA_STRG))
     basptdistance = calculate_distance(baspt, INTERNAL_ORIGIN)
-    # ____________________________________Calculate the angle between the points
-    truenorthangle = calculate_angle(baspt, survpt)
-    # _______________________________Print the Project Coordinates and Distances
-    tbdata = [['Internal Origin Coordinates', 
-        str(INTERNAL_ORIGIN[0]),str(INTERNAL_ORIGIN[1]),str(INTERNAL_ORIGIN[2]),
-        ' ', ' '],
-        ['Project Base Point Coordinates to Internal Origin', 
-            points_distances_angles(baspt)[0],
-            points_distances_angles(baspt)[1],
-            points_distances_angles(baspt)[2],
-            points_distances_angles(baspt)[3],
-            points_distances_angles(baspt)[4]],
-        ['Survey Point Coordinates to Internal Origin', 
-            points_distances_angles(survpt)[0],
-            points_distances_angles(survpt)[1],
-            points_distances_angles(survpt)[2],
-            points_distances_angles(survpt)[3],
-            points_distances_angles(survpt)[4]],
-        ['Project Base Point to Survey Delta X', ' ', ' ', ' ',
-            convert_units(calculate_delta_x(
-                baspt, survpt), document)],
-        ['Project Base Point to Survey Delta Y', ' ', ' ', ' ',
-            convert_units(calculate_delta_y(
-                baspt, survpt), document)],
-        ['Planar Distance between Base Point and Survey Point',
-        ' ', ' ', ' ', 
-            convert_units(calculate_horizontal_distance(
-                baspt, survpt), document),
-                truenorthangle],
-        ['Total Distance between Base Point and Survey Point',
-        ' ', ' ', ' ',
-            convert_units(calculate_distance(
-                baspt, survpt), document),
-            ' '],
-        ['Project Elevation', 
-            ' ', ' ', convert_values(baspt[2], document),
-            convert_units((survpt[2] - baspt[2]), document)]]
-    # Print Table
+    # endregion
+    # region Print Table
+    tbdata = [
+        report_point('Project Base Point Coordinates to Internal Origin', 
+                     baspt, basptdistance),
+        report_point('Survey Point Coordinates to Internal Origin', 
+                     survpt, surveydistance),
+        report_point('Project Base Point to Survey Delta X', 
+                     baspt, calculate_delta(baspt, survpt, delta = 'x'), 
+                     distance_only=True),
+        report_point('Project Base Point to Survey Delta Y', 
+                     baspt, calculate_delta(baspt, survpt, delta = 'y'), 
+                     distance_only=True),
+        report_point('Planar Distance between Base Point and Survey Point', 
+                     baspt, calculate_horizontal_distance(baspt, survpt), 
+                     distance_only=True),
+        report_point('Total Distance between Base Point and Survey Point', 
+                     baspt, calculate_distance(baspt, survpt), 
+                     distance_only=True),
+        report_point('Project Elevation (Base Point Vertical Distance)', 
+                     baspt, calculate_delta(baspt, survpt, delta = 'z'),
+                        distance_only=True)
+    ]
     output.print_table(table_data=tbdata, 
                     title='Project Coordinates and Distances',
                     columns=
-                        ['Coordinates',
-                        ' X  ',
-                        ' Y  ',
-                        ' Z  ',
+                        ['Points',
+                        ' XYZ Coordinates',
                         ' Distance (' + str(unit_system) + ')  ',
                         ' ANGLE (°)  '],
                     formats=['', '' , '', '', '', ''])
+    # endregion
 
 def check_model_extents(document=doc):
     """
@@ -451,7 +469,6 @@ def check_model_extents(document=doc):
     Returns:
         Test Score (int): The score of the test.
     """
-        # _______________________________________Get the bounding box of the 3D view
     print("")
     output.print_md('# Checking the extents of the 3D view bounding box')
     bbox = get_temp_view_bbox(document)
@@ -462,10 +479,12 @@ def check_model_extents(document=doc):
     print("")
     if (calculate_distance(min, INTERNAL_ORIGIN) > EXTENT_DISTANCE or 
         calculate_distance(max, INTERNAL_ORIGIN) > EXTENT_DISTANCE):
-        output.print_md('{} 3D View Bounding Box extends more than {}'.format(BAD_STRG, CRITERIA_STRG))
+        output.print_md('{} 3D View Bounding Box extends more than {}'.
+                        format(BAD_STRG, CRITERIA_STRG))
         return 0
     else:
-        output.print_md('{} 3D View Bounding Box is located less than {}'.format(GOOD_STRG, CRITERIA_STRG))
+        output.print_md('{} 3D View Bounding Box is located less than {}'.
+                        format(GOOD_STRG, CRITERIA_STRG))
         return 1
 
 def check_design_options(document=doc):
@@ -476,8 +495,6 @@ def check_design_options(document=doc):
     Returns:
         Test Score (int): The score of the test.
     """
-    
-        # _____________________________________________Get Objects in Design Options
     print("")
     print(divider)
     output.print_md('# Checking the extents of the design option objects')
@@ -508,10 +525,13 @@ def check_design_options(document=doc):
                                                 AsElementId())
     if len(violating_design_option_objects) > 0:
         output.print_md(BAD_STRG + 
-        'Design Option Objects are located more than {}'.format(CRITERIA_STRG))
+        'Design Option Objects are located more than {}'.
+                            format(CRITERIA_STRG))
         if len(violating_design_option_objects) > 10:
-            output.print_md('{} Showing the first 10 objects'.format(WARN_STRG))
-            output.print_md('{} Manual investigation is required'.format(WARN_STRG))
+            output.print_md('{} Showing the first 10 objects'.
+                            format(WARN_STRG))
+            output.print_md('{} Manual investigation is required'.
+                            format(WARN_STRG))
         counter = 0
         limit = 10
         violating_design_option_objects = violating_design_option_objects[:limit]
@@ -528,7 +548,9 @@ def check_design_options(document=doc):
             counter += 1
         return 0
     else:
-        output.print_md('{} No object in any design option is located more than {}'.format(GOOD_STRG, CRITERIA_STRG))
+        output.print_md(
+            '{} No object in any design option is located more than {}'.
+            format(GOOD_STRG, CRITERIA_STRG))
         return 1
 
 def check_linked_elements(document=doc):
@@ -539,6 +561,7 @@ def check_linked_elements(document=doc):
     Returns:
         Test Score (int): The score of the test.
     """
+    # region collect bad cads and rvts
     limit = 5
     print(divider)
     output.print_md('# Checking the extents of the CAD and RVT links')
@@ -547,7 +570,8 @@ def check_linked_elements(document=doc):
     badcads = badcads[:limit]
     badrvts = get_far_elements(doc, cad=False, rvt=True)
     badrvts = badrvts[:limit]
-
+    # endregion
+    # region Print Results
     if badcads:
         for x in badcads:
             print(output.linkify(x.Id)+"__" + 
@@ -559,23 +583,28 @@ def check_linked_elements(document=doc):
                 str(x.Name) + '  ' + str(x.Category.Name))
 
     else:
-        output.print_md('{} All CAD and RVT Links are located less than {}'.format(GOOD_STRG, CRITERIA_STRG))
+        output.print_md('{} All CAD and RVT Links are located less than {}'.
+                        format(GOOD_STRG, CRITERIA_STRG))
         test_score = 2
         print(divider)
-
+    # endregion
+    # region hide linked elements for further analysis
     hide_linked_elements(document, make_temp_view(document), True, True)
     cleanbbox = get_temp_view_bbox(doc)
     if check_bounding_box(cleanbbox, INTERNAL_ORIGIN, EXTENT_DISTANCE) == 0:
-        output.print_md('{} Distant objects are still being detected!'.format(BAD_STRG))
+        output.print_md('{} Distant objects are still being detected!'.
+                        format(BAD_STRG))
         output.print_md('{} Further Analysis Required.'.format(WARN_STRG))
     else:
-        output.print_md('{} All Objects are located less than {}'.format(GOOD_STRG, CRITERIA_STRG))
+        output.print_md('{} All Objects are located less than {}'.
+                        format(GOOD_STRG, CRITERIA_STRG))
         script.exit()
+    # endregion
     print(divider)
     output.print_md('# Checking everything, It is going to take a while.')
     output.print_md('# Please be patient.')
 
-def check_all_elements(document=doc): # Main Function
+def check_all_elements(document=doc): 
     """
     Checks the extents of all elements in the model.
     Args:
@@ -589,18 +618,21 @@ def check_all_elements(document=doc): # Main Function
     badelements = badelements[:limit]
     if badelements:
         if len(badelements) > limit:
-            output.print_md('{} Showing the first 10 objects'.format(WARN_STRG))
-            output.print_md('{} Manual investigation is required'.format(WARN_STRG))
-        output.print_md('{} Elements below are located more than {}'.format(BAD_STRG, CRITERIA_STRG))
+            output.print_md('{} Showing the first 10 objects'.
+                            format(WARN_STRG))
+            output.print_md('{} Manual investigation is required'.
+                            format(WARN_STRG))
+        output.print_md('{} Elements below are located more than {}'.
+                        format(BAD_STRG, CRITERIA_STRG))
         for x in badelements:
             print(output.linkify(x.Id)+ '  ' + 
                     str(x.Name) + '  ' + str(x.Category.Name))
 
     else:
-        output.print_md('{} All Objects are located less than {}'.format(GOOD_STRG, CRITERIA_STRG))
+        output.print_md('{} All Objects are located less than {}'.
+                        format(GOOD_STRG, CRITERIA_STRG))
     output.print_md('# All tests completed, Review the results above.')
-# endregion
-# region Preflight Test Case
+
 class ModelChecker(PreflightTestCase):
     """
     Checks the extents of all elements in the model.
@@ -650,4 +682,3 @@ class ModelChecker(PreflightTestCase):
 
     def doCleanups(self, doc, output):
         pass
-# endregion
