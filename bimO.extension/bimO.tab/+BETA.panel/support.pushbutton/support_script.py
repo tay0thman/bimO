@@ -1,7 +1,7 @@
 from pyrevit import revit, script, DB, forms, HOST_APP
 import os
 import datetime
-
+import psutil
 import GPUtil
 
 doc = __revit__.ActiveUIDocument.Document
