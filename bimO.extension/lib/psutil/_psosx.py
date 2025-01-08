@@ -22,8 +22,6 @@ from ._common import isfile_strict
 from ._common import memoize_when_activated
 from ._common import parse_environ_block
 from ._common import usage_percent
-from ._compat import PermissionError
-from ._compat import ProcessLookupError
 
 
 __extra__all__ = []
@@ -345,15 +343,15 @@ def wrap_exceptions(fun):
 
     @functools.wraps(fun)
     def wrapper(self, *args, **kwargs):
+        pid, ppid, name = self.pid, self._ppid, self._name
         try:
             return fun(self, *args, **kwargs)
-        except ProcessLookupError:
-            if is_zombie(self.pid):
-                raise ZombieProcess(self.pid, self._name, self._ppid)
-            else:
-                raise NoSuchProcess(self.pid, self._name)
-        except PermissionError:
-            raise AccessDenied(self.pid, self._name)
+        except ProcessLookupError as err:
+            if is_zombie(pid):
+                raise ZombieProcess(pid, name, ppid) from err
+            raise NoSuchProcess(pid, name) from err
+        except PermissionError as err:
+            raise AccessDenied(pid, name) from err
 
     return wrapper
 
@@ -502,11 +500,6 @@ class Process:
 
     @wrap_exceptions
     def net_connections(self, kind='inet'):
-        if kind not in conn_tmap:
-            raise ValueError(
-                "invalid %r kind argument; choose between %s"
-                % (kind, ', '.join([repr(x) for x in conn_tmap]))
-            )
         families, types = conn_tmap[kind]
         rawlist = cext.proc_net_connections(self.pid, families, types)
         ret = []
