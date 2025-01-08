@@ -1,12 +1,22 @@
+#!python3
 from pyrevit import revit, script, DB, forms, HOST_APP
 import os
 import datetime
+import psutil
 
 import GPUtil
 
 doc = __revit__.ActiveUIDocument.Document
 
 def GetFileName(doc):
+    """
+    Retrieves the file path of the given document.
+    Args:
+        doc: The document object from which to retrieve the file path.
+    Returns:
+        str: The file path of the document if available, otherwise an error message.
+    """
+
     try:
         return doc.PathName
     except Exception as e:
