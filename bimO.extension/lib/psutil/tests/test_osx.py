@@ -62,7 +62,7 @@ class TestProcess(PsutilTestCase):
         terminate(cls.pid)
 
     def test_process_create_time(self):
-        output = sh("ps -o lstart -p %s" % self.pid)
+        output = sh(f"ps -o lstart -p {self.pid}")
         start_ps = output.replace('STARTED', '').strip()
         hhmmss = start_ps.split(' ')[-2]
         year = start_ps.split(' ')[-1]
@@ -83,7 +83,7 @@ class TestSystemAPIs(PsutilTestCase):
         # test psutil.disk_usage() and psutil.disk_partitions()
         # against "df -a"
         def df(path):
-            out = sh('df -k "%s"' % path).strip()
+            out = sh(f'df -k "{path}"').strip()
             lines = out.split('\n')
             lines.pop(0)
             line = lines.pop(0)
@@ -172,7 +172,7 @@ class TestSystemAPIs(PsutilTestCase):
     def test_net_if_stats(self):
         for name, stats in psutil.net_if_stats().items():
             try:
-                out = sh("ifconfig %s" % name)
+                out = sh(f"ifconfig {name}")
             except RuntimeError:
                 pass
             else:
@@ -185,7 +185,7 @@ class TestSystemAPIs(PsutilTestCase):
     def test_sensors_battery(self):
         out = sh("pmset -g batt")
         percent = re.search(r"(\d+)%", out).group(1)
-        drawing_from = re.search("Now drawing from '([^']+)'", out).group(1)
+        drawing_from = re.search(r"Now drawing from '([^']+)'", out).group(1)
         power_plugged = drawing_from == "AC Power"
         psutil_result = psutil.sensors_battery()
         assert psutil_result.power_plugged == power_plugged
