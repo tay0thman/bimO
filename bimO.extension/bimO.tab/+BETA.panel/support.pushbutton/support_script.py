@@ -68,6 +68,13 @@ def get_cpu_brand():
     except Exception as e:
         return f"Error: {str(e)}"
 
+def get_project_info_number():
+    try:
+        project_number = doc.ProjectInformation.Number
+        return project_number
+    except Exception as e:
+        return f"Error: {str(e)}"
+
 def get_total_memory():
     try:
         memory = psutil.virtual_memory()
@@ -146,6 +153,8 @@ def build_email_body():
 
 ===============================================================================
 Revit Document Information
+
+Project Number: {get_project_info_number()}
 
 Document Name: {document_info['Document Name']}
 
