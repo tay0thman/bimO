@@ -17,10 +17,13 @@ def create_mailto_link(email, subject, body):
     return mailto_link
 
 def send_support_email():
-    email_subject = "Support Request"
+    email_subject = "Test_Revit_Support_Request"
     email_body = build_email_body()
     mailto_link = create_mailto_link(target_email, email_subject, email_body)
-    os.system(f'start {mailto_link}')
+    print(mailto_link)
+    email_body_lines = email_body.split('\n')
+    formatted_body = "%0D%0A".join(email_body_lines)
+    subprocess.run(['powershell', '-Command', f'Start-Process "mailto:{target_email}?subject={email_subject}&body={formatted_body}"'])
 
 def get_current_time():
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -112,8 +115,7 @@ def collect_system_info():
         "GPU Info": get_gpu_info()
     }
     
-    for key, value in system_info.items():
-        print(f"{key}: {value}")
+
     return system_info
 
 def get_active_document_name():
@@ -133,34 +135,47 @@ def collect_document_info():
         "Active View": get_active_view()
     }
     
-    for key, value in document_info.items():
-        print(f"{key}: {value}")
+
     return document_info
 
 def build_email_body():
     document_info = collect_document_info()
     system_info = collect_system_info()
-    email_body = f"""
-    <h1>Support Request</h1>
-    <br>
-    <br>
-    <br>
-    <h2>Document Information</h2>
-    <p><strong>Document Name:</strong> {document_info['Document Name']}</p>
-    <p><strong>Document Path:</strong> {document_info['Document Path']}</p>
-    <p><strong>Active View:</strong> {document_info['Active View']}</p>
-    <br>
-    <h2>System Information</h2>
-    <p><strong>Revit Version:</strong> {system_info['Revit Version']}</p>
-    <p><strong>Operating System:</strong> {system_info['Operating System']}</p>
-    <p><strong>Computer Name:</strong> {system_info['Computer Name']}</p>
-    <p><strong>Username:</strong> {system_info['Username']}</p>
-    <p><strong>CPU Brand:</strong> {system_info['CPU Brand']}</p>
-    <p><strong>CPU Cores:</strong> {system_info['CPU Cores']}</p>
-    <p><strong>Total Memory:</strong> {system_info['Total Memory']}</p>
-    <p><strong>Memory Usage:</strong> {system_info['Memory Usage']}</p>
-    <p><strong>GPU Info:</strong> {system_info['GPU Info']}</p>
-    """
+    email_body = f"""Support Request
+    
+((( Please provide a detailed description of the issue you are experiencing below )))
+
+
+
+Revit Document Information
+
+Document Name: {document_info['Document Name']}
+
+Document Path: {document_info['Document Path']}
+
+Active View: {document_info['Active View']}
+
+System Information
+
+Revit Version: {system_info['Revit Version']}
+
+Operating System: {system_info['Operating System']}
+
+Computer Name: {system_info['Computer Name']}
+
+Username: {system_info['Username']}
+
+CPU Brand: {system_info['CPU Brand']}
+
+CPU Cores: {system_info['CPU Cores']}
+
+Total Memory: {system_info['Total Memory']}
+
+Memory Usage: {system_info['Memory Usage']}
+
+GPU Info: {system_info['GPU Info']}
+"""
+    print(email_body)
     return email_body
 if __name__ == "__main__":
     send_support_email()
