@@ -19,8 +19,6 @@ def create_mailto_link(email, subject, body):
 def send_support_email():
     email_subject = "Test_Revit_Support_Request"
     email_body = build_email_body()
-    mailto_link = create_mailto_link(target_email, email_subject, email_body)
-    print(mailto_link)
     email_body_lines = email_body.split('\n')
     formatted_body = "%0D%0A".join(email_body_lines)
     subprocess.run(['powershell', '-Command', f'Start-Process "mailto:{target_email}?subject={email_subject}&body={formatted_body}"'])
@@ -176,7 +174,6 @@ Memory Usage: {system_info['Memory Usage']}
 
 GPU Info: {system_info['GPU Info']}
 """
-    print(email_body)
-    return email_body
+
 if __name__ == "__main__":
     send_support_email()
