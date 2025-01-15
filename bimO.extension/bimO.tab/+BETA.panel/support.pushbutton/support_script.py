@@ -142,11 +142,11 @@ def build_email_body():
     document_info = collect_document_info()
     system_info = collect_system_info()
     email_body = f"""Support Request
-    
+===============================================================================    
 ((( Please provide a detailed description of the issue you are experiencing below )))
 
 
-
+===============================================================================
 Revit Document Information
 
 Document Name: {document_info['Document Name']}
@@ -155,6 +155,7 @@ Document Path: {document_info['Document Path']}
 
 Active View: {document_info['Active View']}
 
+===============================================================================
 System Information
 
 Revit Version: {system_info['Revit Version']}
