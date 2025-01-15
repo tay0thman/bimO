@@ -174,6 +174,7 @@ Memory Usage: {system_info['Memory Usage']}
 
 GPU Info: {system_info['GPU Info']}
 """
+    return email_body
 
 if __name__ == "__main__":
     send_support_email()
