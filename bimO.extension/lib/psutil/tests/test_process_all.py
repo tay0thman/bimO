@@ -27,6 +27,10 @@ from psutil import OPENBSD
 from psutil import OSX
 from psutil import POSIX
 from psutil import WINDOWS
+from psutil._compat import PY3
+from psutil._compat import FileNotFoundError
+from psutil._compat import long
+from psutil._compat import unicode
 from psutil.tests import CI_TESTING
 from psutil.tests import PYTEST_PARALLEL
 from psutil.tests import QEMU_USER
@@ -135,16 +139,14 @@ class TestFetchAllProcesses(PsutilTestCase):
                     meth(value, info)
                 except Exception:  # noqa: BLE001
                     s = '\n' + '=' * 70 + '\n'
-                    s += (
-                        "FAIL: name=test_{}, pid={}, ret={}\ninfo={}\n".format(
-                            name,
-                            info['pid'],
-                            repr(value),
-                            info,
-                        )
+                    s += "FAIL: name=test_%s, pid=%s, ret=%s\ninfo=%s\n" % (
+                        name,
+                        info['pid'],
+                        repr(value),
+                        info,
                     )
                     s += '-' * 70
-                    s += f"\n{traceback.format_exc()}"
+                    s += "\n%s" % traceback.format_exc()
                     s = "\n".join((" " * 4) + i for i in s.splitlines()) + "\n"
                     failures.append(s)
                 else:
@@ -159,7 +161,7 @@ class TestFetchAllProcesses(PsutilTestCase):
             assert isinstance(part, str)
 
     def exe(self, ret, info):
-        assert isinstance(ret, str)
+        assert isinstance(ret, (str, unicode))
         assert ret.strip() == ret
         if ret:
             if WINDOWS and not ret.endswith('.exe'):
@@ -182,12 +184,12 @@ class TestFetchAllProcesses(PsutilTestCase):
         assert ret >= 0
 
     def ppid(self, ret, info):
-        assert isinstance(ret, int)
+        assert isinstance(ret, (int, long))
         assert ret >= 0
         proc_info(ret)
 
     def name(self, ret, info):
-        assert isinstance(ret, str)
+        assert isinstance(ret, (str, unicode))
         if WINDOWS and not ret and is_win_secure_system_proc(info['pid']):
             # https://github.com/giampaolo/psutil/issues/2338
             return
@@ -243,7 +245,7 @@ class TestFetchAllProcesses(PsutilTestCase):
     def io_counters(self, ret, info):
         assert is_namedtuple(ret)
         for field in ret:
-            assert isinstance(field, int)
+            assert isinstance(field, (int, long))
             if field != -1:
                 assert field >= 0
 
@@ -304,7 +306,7 @@ class TestFetchAllProcesses(PsutilTestCase):
     def memory_info(self, ret, info):
         assert is_namedtuple(ret)
         for value in ret:
-            assert isinstance(value, int)
+            assert isinstance(value, (int, long))
             assert value >= 0
         if WINDOWS:
             assert ret.peak_wset >= ret.wset
@@ -317,7 +319,7 @@ class TestFetchAllProcesses(PsutilTestCase):
         total = psutil.virtual_memory().total
         for name in ret._fields:
             value = getattr(ret, name)
-            assert isinstance(value, int)
+            assert isinstance(value, (int, long))
             assert value >= 0
             if LINUX or (OSX and name in {'vms', 'data'}):
                 # On Linux there are processes (e.g. 'goa-daemon') whose
@@ -366,7 +368,7 @@ class TestFetchAllProcesses(PsutilTestCase):
                 check_connection_ntuple(conn)
 
     def cwd(self, ret, info):
-        assert isinstance(ret, str)
+        assert isinstance(ret, (str, unicode))
         assert ret.strip() == ret
         if ret:
             assert os.path.isabs(ret), ret
@@ -410,21 +412,18 @@ class TestFetchAllProcesses(PsutilTestCase):
             for fname in nt._fields:
                 value = getattr(nt, fname)
                 if fname == 'path':
-                    if value.startswith(("[", "anon_inode:")):  # linux
-                        continue
-                    if BSD and value == "pvclock":  # seen on FreeBSD
-                        continue
-                    assert os.path.isabs(nt.path), nt.path
-                    # commented as on Linux we might get
-                    # '/foo/bar (deleted)'
-                    # assert os.path.exists(nt.path), nt.path
+                    if not value.startswith(("[", "anon_inode:")):
+                        assert os.path.isabs(nt.path), nt.path
+                        # commented as on Linux we might get
+                        # '/foo/bar (deleted)'
+                        # assert os.path.exists(nt.path), nt.path
                 elif fname == 'addr':
                     assert value, repr(value)
                 elif fname == 'perms':
                     if not WINDOWS:
                         assert value, repr(value)
                 else:
-                    assert isinstance(value, int)
+                    assert isinstance(value, (int, long))
                     assert value >= 0
 
     def num_handles(self, ret, info):
@@ -442,12 +441,15 @@ class TestFetchAllProcesses(PsutilTestCase):
                 if x.endswith('_PRIORITY_CLASS')
             ]
             assert ret in priorities
-            assert isinstance(ret, enum.IntEnum)
+            if PY3:
+                assert isinstance(ret, enum.IntEnum)
+            else:
+                assert isinstance(ret, int)
 
     def num_ctx_switches(self, ret, info):
         assert is_namedtuple(ret)
         for value in ret:
-            assert isinstance(value, int)
+            assert isinstance(value, (int, long))
             assert value >= 0
 
     def rlimit(self, ret, info):
@@ -489,7 +491,7 @@ class TestPidsRange(PsutilTestCase):
     def test_it(self):
         def is_linux_tid(pid):
             try:
-                f = open(f"/proc/{pid}/status", "rb")  # noqa: SIM115
+                f = open("/proc/%s/status" % pid, "rb")
             except FileNotFoundError:
                 return False
             else:

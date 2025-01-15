@@ -6,8 +6,8 @@
 
 """Tests for system APIS."""
 
+import contextlib
 import datetime
-import enum
 import errno
 import os
 import platform
@@ -17,7 +17,6 @@ import signal
 import socket
 import sys
 import time
-from unittest import mock
 
 import psutil
 from psutil import AIX
@@ -30,8 +29,12 @@ from psutil import OPENBSD
 from psutil import POSIX
 from psutil import SUNOS
 from psutil import WINDOWS
+from psutil._compat import PY3
+from psutil._compat import FileNotFoundError
+from psutil._compat import long
 from psutil.tests import ASCII_FS
 from psutil.tests import CI_TESTING
+from psutil.tests import DEVNULL
 from psutil.tests import GITHUB_ACTIONS
 from psutil.tests import GLOBAL_TIMEOUT
 from psutil.tests import HAS_BATTERY
@@ -48,6 +51,8 @@ from psutil.tests import QEMU_USER
 from psutil.tests import UNICODE_SUFFIX
 from psutil.tests import PsutilTestCase
 from psutil.tests import check_net_address
+from psutil.tests import enum
+from psutil.tests import mock
 from psutil.tests import pytest
 from psutil.tests import retry_on_failure
 
@@ -189,7 +194,7 @@ class TestProcessAPIs(PsutilTestCase):
         sproc1.terminate()
         sproc2.terminate()
         gone, alive = test_2(procs, callback)
-        assert set(pids) == {sproc1.pid, sproc2.pid, sproc3.pid}
+        assert set(pids) == set([sproc1.pid, sproc2.pid, sproc3.pid])
         for p in gone:
             assert hasattr(p, 'returncode')
 
@@ -251,14 +256,23 @@ class TestMiscAPIs(PsutilTestCase):
                 assert isinstance(user.terminal, (str, type(None)))
                 if user.host is not None:
                     assert isinstance(user.host, (str, type(None)))
-                user.terminal  # noqa: B018
-                user.host  # noqa: B018
+                user.terminal  # noqa
+                user.host  # noqa
                 assert user.started > 0.0
                 datetime.datetime.fromtimestamp(user.started)
                 if WINDOWS or OPENBSD:
                     assert user.pid is None
                 else:
                     psutil.Process(user.pid)
+
+    def test_test(self):
+        # test for psutil.test() function
+        stdout = sys.stdout
+        sys.stdout = DEVNULL
+        try:
+            psutil.test()
+        finally:
+            sys.stdout = stdout
 
     def test_os_constants(self):
         names = [
@@ -321,13 +335,14 @@ class TestMemoryAPIs(PsutilTestCase):
         for name in mem._fields:
             value = getattr(mem, name)
             if name != 'percent':
-                assert isinstance(value, int)
+                assert isinstance(value, (int, long))
             if name != 'total':
                 if not value >= 0:
-                    raise self.fail(f"{name!r} < 0 ({value})")
+                    raise self.fail("%r < 0 (%s)" % (name, value))
                 if value > mem.total:
                     raise self.fail(
-                        f"{name!r} > total (total={mem.total}, {name}={value})"
+                        "%r > total (total=%s, %s=%s)"
+                        % (name, mem.total, name, value)
                     )
 
     def test_swap_memory(self):
@@ -416,9 +431,8 @@ class TestCpuAPIs(PsutilTestCase):
         #         for field in new._fields:
         #             new_t = getattr(new, field)
         #             last_t = getattr(last, field)
-        #             self.assertGreaterEqual(
-        #                 new_t, last_t,
-        #                 msg="{} {}".format(new_t, last_t))
+        #             self.assertGreaterEqual(new_t, last_t,
+        #                                     msg="%s %s" % (new_t, last_t))
         #         last = new
 
     def test_cpu_times_time_increases(self):
@@ -462,7 +476,7 @@ class TestCpuAPIs(PsutilTestCase):
         #             new_t = getattr(newcpu, field)
         #             last_t = getattr(lastcpu, field)
         #             self.assertGreaterEqual(
-        #                 new_t, last_t, msg="{} {}".format(lastcpu, newcpu))
+        #                 new_t, last_t, msg="%s %s" % (lastcpu, newcpu))
         #     last = new
 
     def test_per_cpu_times_2(self):
@@ -478,12 +492,11 @@ class TestCpuAPIs(PsutilTestCase):
                 t1, t2 = psutil._cpu_busy_time(t1), psutil._cpu_busy_time(t2)
                 difference = t2 - t1
                 if difference >= 0.05:
-                    return None
+                    return
 
     @pytest.mark.skipif(
         CI_TESTING and OPENBSD, reason="unreliable on OPENBSD + CI"
     )
-    @retry_on_failure(30)
     def test_cpu_times_comparison(self):
         # Make sure the sum of all per cpu times is almost equal to
         # base "one cpu" times. On OpenBSD the sum of per-CPUs is
@@ -495,7 +508,7 @@ class TestCpuAPIs(PsutilTestCase):
             with self.subTest(field=field, base=base, per_cpu=per_cpu):
                 assert (
                     abs(getattr(base, field) - getattr(summed_values, field))
-                    < 2
+                    < 1
                 )
 
     def _test_cpu_percent(self, percent, last_ret, new_ret):
@@ -505,9 +518,8 @@ class TestCpuAPIs(PsutilTestCase):
             assert percent <= 100.0 * psutil.cpu_count()
         except AssertionError as err:
             raise AssertionError(
-                "\n{}\nlast={}\nnew={}".format(
-                    err, pprint.pformat(last_ret), pprint.pformat(new_ret)
-                )
+                "\n%s\nlast=%s\nnew=%s"
+                % (err, pprint.pformat(last_ret), pprint.pformat(new_ret))
             )
 
     def test_cpu_percent(self):
@@ -593,7 +605,7 @@ class TestCpuAPIs(PsutilTestCase):
                     assert nt.current <= nt.max
                 for name in nt._fields:
                     value = getattr(nt, name)
-                    assert isinstance(value, (int, float))
+                    assert isinstance(value, (int, long, float))
                     assert value >= 0
 
         ls = psutil.cpu_freq(percpu=True)
@@ -673,7 +685,7 @@ class TestDiskAPIs(PsutilTestCase):
             else:
                 # we cannot make any assumption about this, see:
                 # http://goo.gl/p9c43
-                disk.device  # noqa: B018
+                disk.device  # noqa
             # on modern systems mount points can also be files
             assert os.path.exists(disk.mountpoint), disk
             assert disk.fstype, disk
@@ -811,7 +823,7 @@ class TestNetAPIs(PsutilTestCase):
         # self.assertEqual(sorted(nics.keys()),
         #                  sorted(psutil.net_io_counters(pernic=True).keys()))
 
-        families = {socket.AF_INET, socket.AF_INET6, psutil.AF_LINK}
+        families = set([socket.AF_INET, socket.AF_INET6, psutil.AF_LINK])
         for nic, addrs in nics.items():
             assert isinstance(nic, str)
             assert len(set(addrs)) == len(addrs)
@@ -821,12 +833,14 @@ class TestNetAPIs(PsutilTestCase):
                 assert isinstance(addr.netmask, (str, type(None)))
                 assert isinstance(addr.broadcast, (str, type(None)))
                 assert addr.family in families
-                assert isinstance(addr.family, enum.IntEnum)
+                if PY3 and not PYPY:
+                    assert isinstance(addr.family, enum.IntEnum)
                 if nic_stats[nic].isup:
                     # Do not test binding to addresses of interfaces
                     # that are down
                     if addr.family == socket.AF_INET:
-                        with socket.socket(addr.family) as s:
+                        s = socket.socket(addr.family)
+                        with contextlib.closing(s):
                             s.bind((addr.address, 0))
                     elif addr.family == socket.AF_INET6:
                         info = socket.getaddrinfo(
@@ -838,7 +852,8 @@ class TestNetAPIs(PsutilTestCase):
                             socket.AI_PASSIVE,
                         )[0]
                         af, socktype, proto, _canonname, sa = info
-                        with socket.socket(af, socktype, proto) as s:
+                        s = socket.socket(af, socktype, proto)
+                        with contextlib.closing(s):
                             s.bind(sa)
                 for ip in (
                     addr.address,
@@ -966,5 +981,5 @@ class TestSensorsAPIs(PsutilTestCase):
             assert isinstance(name, str)
             for entry in entries:
                 assert isinstance(entry.label, str)
-                assert isinstance(entry.current, int)
+                assert isinstance(entry.current, (int, long))
                 assert entry.current >= 0

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 # Copyright (c) 2009, Giampaolo Rodola'. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -10,10 +11,8 @@ import datetime
 import errno
 import os
 import re
-import shutil
 import subprocess
 import time
-from unittest import mock
 
 import psutil
 from psutil import AIX
@@ -28,12 +27,14 @@ from psutil.tests import HAS_NET_IO_COUNTERS
 from psutil.tests import PYTHON_EXE
 from psutil.tests import QEMU_USER
 from psutil.tests import PsutilTestCase
+from psutil.tests import mock
 from psutil.tests import pytest
 from psutil.tests import retry_on_failure
 from psutil.tests import sh
 from psutil.tests import skip_on_access_denied
 from psutil.tests import spawn_testproc
 from psutil.tests import terminate
+from psutil.tests import which
 
 
 if POSIX:
@@ -135,7 +136,7 @@ def ps_vsz(pid):
 
 def df(device):
     try:
-        out = sh(f"df -k {device}").strip()
+        out = sh("df -k %s" % device).strip()
     except RuntimeError as err:
         if "device busy" in str(err).lower():
             raise pytest.skip("df returned EBUSY")
@@ -287,7 +288,7 @@ class TestProcess(PsutilTestCase):
             assert ps_pathname == psutil_pathname
         except AssertionError:
             # certain platforms such as BSD are more accurate returning:
-            # "/usr/local/bin/python3.7"
+            # "/usr/local/bin/python2.7"
             # ...instead of:
             # "/usr/local/bin/python"
             # We do not want to consider this difference in accuracy
@@ -347,7 +348,7 @@ class TestSystemAPIs(PsutilTestCase):
     # for some reason ifconfig -a does not report all interfaces
     # returned by psutil
     @pytest.mark.skipif(SUNOS, reason="unreliable on SUNOS")
-    @pytest.mark.skipif(not shutil.which("ifconfig"), reason="no ifconfig cmd")
+    @pytest.mark.skipif(not which('ifconfig'), reason="no ifconfig cmd")
     @pytest.mark.skipif(not HAS_NET_IO_COUNTERS, reason="not supported")
     def test_nic_names(self):
         output = sh("ifconfig -a")
@@ -357,8 +358,8 @@ class TestSystemAPIs(PsutilTestCase):
                     break
             else:
                 raise self.fail(
-                    f"couldn't find {nic} nic in 'ifconfig -a'"
-                    f" output\n{output}"
+                    "couldn't find %s nic in 'ifconfig -a' output\n%s"
+                    % (nic, output)
                 )
 
     # @pytest.mark.skipif(CI_TESTING and not psutil.users(),
@@ -407,7 +408,9 @@ class TestSystemAPIs(PsutilTestCase):
                         started = [x.capitalize() for x in started]
 
         if not tstamp:
-            raise pytest.skip(f"cannot interpret tstamp in who output\n{out}")
+            raise pytest.skip(
+                "cannot interpret tstamp in who output\n%s" % (out)
+            )
 
         with self.subTest(psutil=psutil.users(), who=out):
             for idx, u in enumerate(psutil.users()):

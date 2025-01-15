@@ -31,7 +31,7 @@ class AIXSpecificTestCase(PsutilTestCase):
             "available",
             "mmode",
         ]:
-            re_pattern += rf"(?P<{field}>\S+)\s+"
+            re_pattern += r"(?P<%s>\S+)\s+" % (field,)
         matchobj = re.search(re_pattern, out)
 
         assert matchobj is not None
@@ -104,7 +104,7 @@ class AIXSpecificTestCase(PsutilTestCase):
             "S5rd",
             "sysc",
         ]:
-            re_pattern += rf"(?P<{field}>\S+)\s+"
+            re_pattern += r"(?P<%s>\S+)\s+" % (field,)
         matchobj = re.search(re_pattern, out)
 
         assert matchobj is not None

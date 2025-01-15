@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 # Copyright (c) 2009, Giampaolo Rodola'. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -7,6 +8,7 @@
 """Tests for testing utils (psutil.tests namespace)."""
 
 import collections
+import contextlib
 import errno
 import os
 import socket
@@ -15,7 +17,6 @@ import subprocess
 import textwrap
 import unittest
 import warnings
-from unittest import mock
 
 import psutil
 import psutil.tests
@@ -25,6 +26,7 @@ from psutil import POSIX
 from psutil._common import open_binary
 from psutil._common import open_text
 from psutil._common import supports_ipv6
+from psutil._compat import PY3
 from psutil.tests import CI_TESTING
 from psutil.tests import COVERAGE
 from psutil.tests import HAS_NET_CONNECTIONS_UNIX
@@ -42,6 +44,7 @@ from psutil.tests import fake_pytest
 from psutil.tests import filter_proc_net_connections
 from psutil.tests import get_free_port
 from psutil.tests import is_namedtuple
+from psutil.tests import mock
 from psutil.tests import process_namespace
 from psutil.tests import pytest
 from psutil.tests import reap_children
@@ -71,7 +74,7 @@ class TestRetryDecorator(PsutilTestCase):
         def foo():
             while queue:
                 queue.pop()
-                1 / 0  # noqa: B018
+                1 / 0  # noqa
             return 1
 
         queue = list(range(3))
@@ -85,7 +88,7 @@ class TestRetryDecorator(PsutilTestCase):
         def foo():
             while queue:
                 queue.pop()
-                1 / 0  # noqa: B018
+                1 / 0  # noqa
             return 1
 
         queue = list(range(6))
@@ -109,7 +112,7 @@ class TestRetryDecorator(PsutilTestCase):
 
         @retry(retries=5, interval=None, logfun=None)
         def foo():
-            1 / 0  # noqa: B018
+            1 / 0  # noqa
 
         with pytest.raises(ZeroDivisionError):
             foo()
@@ -119,7 +122,7 @@ class TestRetryDecorator(PsutilTestCase):
     def test_retries_arg(self, sleep):
         @retry(retries=5, interval=1, logfun=None)
         def foo():
-            1 / 0  # noqa: B018
+            1 / 0  # noqa
 
         with pytest.raises(ZeroDivisionError):
             foo()
@@ -156,7 +159,7 @@ class TestSyncTestUtils(PsutilTestCase):
     def test_wait_for_file_no_file(self):
         testfn = self.get_testfn()
         with mock.patch('psutil.tests.retry.__iter__', return_value=iter([0])):
-            with pytest.raises(OSError):
+            with pytest.raises(IOError):
                 wait_for_file(testfn)
 
     def test_wait_for_file_no_delete(self):
@@ -295,13 +298,14 @@ class TestProcessUtils(PsutilTestCase):
 class TestNetUtils(PsutilTestCase):
     def bind_socket(self):
         port = get_free_port()
-        with bind_socket(addr=('', port)) as s:
+        with contextlib.closing(bind_socket(addr=('', port))) as s:
             assert s.getsockname()[1] == port
 
     @pytest.mark.skipif(not POSIX, reason="POSIX only")
     def test_bind_unix_socket(self):
         name = self.get_testfn()
-        with bind_unix_socket(name) as sock:
+        sock = bind_unix_socket(name)
+        with contextlib.closing(sock):
             assert sock.family == socket.AF_UNIX
             assert sock.type == socket.SOCK_STREAM
             assert sock.getsockname() == name
@@ -309,17 +313,20 @@ class TestNetUtils(PsutilTestCase):
             assert stat.S_ISSOCK(os.stat(name).st_mode)
         # UDP
         name = self.get_testfn()
-        with bind_unix_socket(name, type=socket.SOCK_DGRAM) as sock:
+        sock = bind_unix_socket(name, type=socket.SOCK_DGRAM)
+        with contextlib.closing(sock):
             assert sock.type == socket.SOCK_DGRAM
 
     def test_tcp_socketpair(self):
         addr = ("127.0.0.1", get_free_port())
         server, client = tcp_socketpair(socket.AF_INET, addr=addr)
-        with server, client:
-            # Ensure they are connected and the positions are correct.
-            assert server.getsockname() == addr
-            assert client.getpeername() == addr
-            assert client.getsockname() != addr
+        with contextlib.closing(server):
+            with contextlib.closing(client):
+                # Ensure they are connected and the positions are
+                # correct.
+                assert server.getsockname() == addr
+                assert client.getpeername() == addr
+                assert client.getsockname() != addr
 
     @pytest.mark.skipif(not POSIX, reason="POSIX only")
     @pytest.mark.skipif(
@@ -407,7 +414,7 @@ class TestMemLeakClass(TestMemoryLeak):
 
     def test_unclosed_files(self):
         def fun():
-            f = open(__file__)  # noqa: SIM115
+            f = open(__file__)
             self.addCleanup(f.close)
             box.append(f)
 
@@ -429,7 +436,7 @@ class TestMemLeakClass(TestMemoryLeak):
 
     def test_execute_w_exc(self):
         def fun_1():
-            1 / 0  # noqa: B018
+            1 / 0  # noqa
 
         self.execute_w_exc(ZeroDivisionError, fun_1)
         with pytest.raises(ZeroDivisionError):
@@ -452,7 +459,7 @@ class TestFakePytest(PsutilTestCase):
 
     def test_raises(self):
         with fake_pytest.raises(ZeroDivisionError) as cm:
-            1 / 0  # noqa: B018
+            1 / 0  # noqa
         assert isinstance(cm.value, ZeroDivisionError)
 
         with fake_pytest.raises(ValueError, match="foo") as cm:
@@ -484,7 +491,7 @@ class TestFakePytest(PsutilTestCase):
         class TestCase(unittest.TestCase):
             @fake_pytest.mark.skipif(True, reason="reason")
             def foo(self):
-                assert 1 == 1  # noqa: PLR0133
+                assert 1 == 1  # noqa
 
         result = self.run_test_class(TestCase("foo"))
         assert result.wasSuccessful()
@@ -494,17 +501,18 @@ class TestFakePytest(PsutilTestCase):
         class TestCase(unittest.TestCase):
             @fake_pytest.mark.skipif(False, reason="reason")
             def foo(self):
-                assert 1 == 1  # noqa: PLR0133
+                assert 1 == 1  # noqa
 
         result = self.run_test_class(TestCase("foo"))
         assert result.wasSuccessful()
         assert len(result.skipped) == 0
 
+    @pytest.mark.skipif(not PY3, reason="not PY3")
     def test_skip(self):
         class TestCase(unittest.TestCase):
             def foo(self):
                 fake_pytest.skip("reason")
-                assert 1 == 0  # noqa: PLR0133
+                assert 1 == 0  # noqa
 
         result = self.run_test_class(TestCase("foo"))
         assert result.wasSuccessful()
@@ -564,12 +572,12 @@ class TestTestingUtils(PsutilTestCase):
         p = psutil.Process()
         ns = process_namespace(p)
         ns.test()
-        fun = next(x for x in ns.iter(ns.getters) if x[1] == 'ppid')[0]
+        fun = [x for x in ns.iter(ns.getters) if x[1] == 'ppid'][0][0]
         assert fun() == p.ppid()
 
     def test_system_namespace(self):
         ns = system_namespace()
-        fun = next(x for x in ns.iter(ns.getters) if x[1] == 'net_if_addrs')[0]
+        fun = [x for x in ns.iter(ns.getters) if x[1] == 'net_if_addrs'][0][0]
         assert fun() == psutil.net_if_addrs()
 
 
