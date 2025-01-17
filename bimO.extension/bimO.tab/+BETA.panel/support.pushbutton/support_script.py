@@ -6,28 +6,12 @@ import System
 import subprocess
 import multiprocessing
 from pyrevit import HOST_APP, DB, revit
-
 import clr
 clr.AddReference("System")
 clr.AddReference("System.Management")
-import System
+clr.AddReference("IronPython.Modules")
 from System.Diagnostics import Process
 from System.Management import ManagementObjectSearcher
-
-# Get CPU usage
-def get_cpu_usage():
-    cpu_usage = Process.GetCurrentProcess().TotalProcessorTime.TotalMilliseconds
-    return cpu_usage
-
-# Get RAM usage
-def get_ram_usage():
-    searcher = ManagementObjectSearcher("SELECT * FROM Win32_OperatingSystem")
-    for os in searcher.Get():
-        ram_usage = os["TotalVisibleMemorySize"]
-    return ram_usage
-
-print("CPU Usage:", get_cpu_usage())
-print("RAM Usage:", get_ram_usage())
 
 # Global Variables
 doc = revit.doc
@@ -99,7 +83,7 @@ def get_total_memory():
         for os in searcher.Get():
             total_memory = int(os["TotalVisibleMemorySize"]) * 1024
         pass  # Removed undefined variable reference
-        total_gigabytes = round(total_memory / (1024 ** 3), 0)
+        total_gigabytes = -(-total_memory // (1024 ** 3))
         return total_gigabytes
     except Exception as e:
         return "Error: {}".format(str(e))
@@ -111,7 +95,7 @@ def get_memory_usage():
             total_memory = int(os["TotalVisibleMemorySize"]) * 1024
             free_memory = int(os["FreePhysicalMemory"]) * 1024
         used_memory = total_memory - free_memory
-        used_gigabytes = round(used_memory / (1024 ** 3), 0)
+        used_gigabytes = -(-used_memory // (1024 ** 3))
         return used_gigabytes
     except Exception as e:
         return "Error: {}".format(str(e))
@@ -127,17 +111,36 @@ def get_gpu_info():
         return "Error: {}".format(str(e))
 
 def get_gpu_vram():
+    searcher = ManagementObjectSearcher("select AdapterRAM, Name from Win32_VideoController")
+    total_vram = 0
+    for gpu in searcher.Get():
+        vram = gpu["AdapterRAM"]
+        name = gpu["Name"]
+        if vram is not None:
+                try:
+                    total_vram += vram
+                except Exception as e:
+                     print("Error processing GPU {}: {}".format(name, str(e)))
+                continue
+        return ("Total VRAM: {0} MB".format(total_vram / (1024 ** 2)))
+def get_gpu_driver_version():
     try:
         searcher = ManagementObjectSearcher("SELECT * FROM Win32_VideoController")
         for item in searcher.Get():
-            if item["AdapterRAM"] is not None:
-                gpu_vram = round(int(float(item["AdapterRAM"])) / (1024 ** 3), 0)
-            else:
-                gpu_vram = "Unknown"
-        return gpu_vram
+            driver_version = item["DriverVersion"]
+        return driver_version
     except Exception as e:
         return "Error: {}".format(str(e))
-
+def get_gpu_driver_date():
+    try:
+        searcher = ManagementObjectSearcher("SELECT * FROM Win32_VideoController")
+        for item in searcher.Get():
+            driver_date = item["DriverDate"]
+        driver_date = datetime.datetime.strptime(item["DriverDate"].split('.')[0], "%Y%m%d%H%M%S").strftime("%Y-%m-%d")
+        return driver_date
+    except Exception as e:
+        return "Error: {}".format(str(e))
+        
 def get_revit_version():
     try:
         revit_version = HOST_APP.app.VersionNumber
@@ -157,7 +160,9 @@ def collect_system_info():
         "Total Memory": "{} GB".format(get_total_memory()),
         "Memory Usage": "{} GB".format(get_memory_usage()),
         "GPU Info": get_gpu_info(),
-        "GPU VRAM": "{} GB".format(get_gpu_vram())
+        "GPU VRAM": "{} OR MORE".format(get_gpu_vram()),
+        "GPU Driver Version": "{}".format(get_gpu_driver_version()),
+        "GPU Driver Date": "{}".format(get_gpu_driver_date())
     }
     return system_info
 
@@ -219,6 +224,10 @@ Memory Usage: {}
 GPU Info: {}
 
 GPU VRAM: {}
+
+GPU Driver Version: {}
+
+GPU Driver Date: {}
 """.format(
         get_project_info_number(),
         document_info['Document Name'],
@@ -233,7 +242,9 @@ GPU VRAM: {}
         system_info['Total Memory'],
         system_info['Memory Usage'],
         system_info['GPU Info'],
-        system_info['GPU VRAM']
+        system_info['GPU VRAM'],
+        system_info['GPU Driver Version'],
+        system_info['GPU Driver Date']
     )
     return email_body
 
