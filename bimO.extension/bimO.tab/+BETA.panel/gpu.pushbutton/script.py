@@ -1,16 +1,16 @@
 import clr
-
-# Load the System.Management namespace
-clr.AddReference("System.Management")
+clr.AddReference('System.Management')
 from System.Management import ManagementObjectSearcher
 
-def get_dedicated_video_memory():
-    searcher = ManagementObjectSearcher("SELECT DedicatedVideoMemory FROM Win32_VideoController")
-    for item in searcher.Get():
-        if item.Properties["DedicatedVideoMemory"].Value is not None:
-            print("Dedicated Video Memory: {} bytes".format(item.Properties["DedicatedVideoMemory"].Value))
+def get_gpu_memory():
+    searcher = ManagementObjectSearcher("SELECT AdapterRAM FROM Win32_VideoController")
+    for obj in searcher.Get():
+        memory_in_bytes = obj["AdapterRAM"]
+        if "AdapterRAM" in obj.Properties:
+            memory_in_bytes = obj["AdapterRAM"]
+            memory_in_mb = memory_in_bytes / (1024 * 1024)  # Convert bytes to MB
+            print("GPU Memory: {} MB".format(memory_in_mb))
         else:
-            print("Dedicated Video Memory: Not available")
+            print("AdapterRAM property not found.")
 
-if __name__ == "__main__":
-    get_dedicated_video_memory()
+get_gpu_memory()
