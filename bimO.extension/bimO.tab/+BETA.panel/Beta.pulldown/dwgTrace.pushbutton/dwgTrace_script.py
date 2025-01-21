@@ -47,9 +47,9 @@ def showFormLS(curDoc, selectedLS=0, selectedDWG="", convertType="detail"):
             if validateLineTypeByView(curDoc, convertType):
                 counter = ConvertDWG(curDoc, curLink, "", curForm.getSelectedLSName(), curForm.getConvertType())
             if counter > 0:
-                TaskDialog.Show("Complete", f"Created {counter} {convertType} lines.")
+                TaskDialog.Show("Complete", "Created " + str(counter) + " " + convertType + " lines.")
             else:
-                TaskDialog.Show("Error", f"Could not create {convertType} lines in the current view.")
+                TaskDialog.Show("Error", "Could not create " + convertType + " lines in the current view.")
         else:
             TaskDialog.Show("Alert", "Please select a DWG to convert.")
             showFormLS(curDoc, curForm.getSelectedLS(), curForm.getConvertType())
@@ -76,9 +76,9 @@ def showFormLayers(curDoc, selectedDWG="", layerList=None, convertType="detail")
                 if validateLineTypeByView(curDoc, curForm.getConvertType()):
                     counter = ConvertDWGByLayers(curDoc, curLink, layerLinetypeList, curForm.getConvertType())
                 if counter > 0:
-                    TaskDialog.Show("Complete", f"Created {counter} {curForm.getConvertType()} lines.")
+                    TaskDialog.Show("Complete", "Created " + str(counter) + " " + curForm.getConvertType() + " lines.")
                 else:
-                    TaskDialog.Show("Error", f"Could not create {curForm.getConvertType()} lines in the current view.")
+                    TaskDialog.Show("Error", "Could not create " + curForm.getConvertType() + " lines in the current view.")
         else:
             TaskDialog.Show("Alert", "Please select a DWG to convert.")
             showFormLayers(curDoc, curForm.getConvertType())
@@ -270,7 +270,7 @@ def getRevitLinestyleFromACADColor(curDoc, lwArray, acadColor):
     for curCat in allLinestyles:
         if curCat.GetLineWeight(GraphicsStyleType.Projection) == revitLW and curCat.LineColor.Equals(Color(0, 0, 0)) and "<" not in curCat.Name:
             return curCat.Name
-    newLinestyle = CreateNewLinestyle(curDoc, f"Line LW {revitLW}", Color(0, 0, 0), revitLW)
+    newLinestyle = CreateNewLinestyle(curDoc, "Line LW " + str(revitLW), Color(0, 0, 0), revitLW)
     return newLinestyle.Name
 
 def validateLineTypeByView(curDoc, convertType):
