@@ -1,13 +1,55 @@
 """Request Support tool config"""
 #pylint: disable=E0401,C0103
 from pyrevit import script, forms
-import os
+import os, wpf, clr
+clr.AddReference("System")
+clr.AddReference("System.Management")
+from System.Windows import Window
+from System.Windows.Controls import TextBox, Button, Label, CheckBox, ListBox, ComboBox
 
 # get the config xml file
 output = script.get_output()
 config = "config.xml"
 defaults = "defaults.xml"
 
+class SupportConfigUI(Window):
+    def __init__(self):
+        wpf.LoadComponent(self, os.path.join(os.path.dirname(__file__), "config.xaml"))
+        self.UI_def_eml.Text = SupportConfig.get_default_email()
+        [self.Tag1.Text,
+         self.Tag2.Text,
+         self.Tag3.Text,
+         self.Tag4.Text,
+         self.Tag5.Text,
+         self.Tag6.Text,
+         self.Tag7.Text,
+         self.Tag8.Text] = SupportConfig.get_hashtags(
+             SupportConfig.file_to_xml(config))
+        if SupportConfig.get_default_email() == "No_Email":
+            self.UI_email_ok.IsChecked = False
+            self.UI_web.IsChecked = True
+        self.ShowDialog()
+
+    def UIe_Save_Config(self, sender, e):
+        """Saves the email address to the config.xml file."""
+        if self.UI_email_ok.IsChecked:
+            if SupportConfig.check_email_format(self.UI_def_eml.Text):
+                new_email = self.UI_def_eml.Text
+            else:
+                forms.alert("Please enter a valid email address.", exitscript=True)
+        else:
+            new_email = "No_Email"
+        new_hashtags = [self.Tag1.Text,
+                        self.Tag2.Text,
+                        self.Tag3.Text,
+                        self.Tag4.Text,
+                        self.Tag5.Text,
+                        self.Tag6.Text,
+                        self.Tag7.Text,
+                        self.Tag8.Text]
+        SupportConfig.write_config_xml(SupportConfig.file_to_xml(config), new_email, new_hashtags)
+        self.Close()
+            
 class SupportConfig:
     @staticmethod
     def file_to_xml(file_name):
@@ -104,27 +146,4 @@ if __name__ == "__main__":
     except:
         SupportConfig.restore_defaults(SupportConfig.file_to_xml(defaults), 
                                        SupportConfig.file_to_xml(config))
-    # read the default email address from the config.xml file
-    target_email = SupportConfig.get_default_email()
-    new_email = forms.ask_for_string(default=target_email, 
-                prompt="Enter the email address for support requests:"
-                , title="Support Email Address")
-    if new_email is None:
-        script.exit()
-    if SupportConfig.check_email_format(new_email):
-        target_email = new_email
-        pass
-    else:
-        forms.alert("Invalid email address format.", exitscript=True)
-    # read the list of hashtags from the config.xml file
-    def_hashtags = SupportConfig.get_hashtags(SupportConfig.file_to_xml(defaults))
-    new_hashtags = forms.SelectFromList.show(def_hashtags,
-                                            botton_name="Add Hashtag", 
-                                            title="Select Hashtags", 
-                                            multiselect=True,
-                                            exit_on_close=True)
-    if new_hashtags is None:
-        script.exit()
-    # write the new email address and hashtags to the config.xml file
-    SupportConfig.write_config_xml(SupportConfig.file_to_xml(config),
-     target_email, new_hashtags)
+    SupportConfigUI()

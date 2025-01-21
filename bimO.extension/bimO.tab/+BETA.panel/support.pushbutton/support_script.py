@@ -56,14 +56,16 @@ class SupportForm(Window):
                                 file_to_xml("config.xml")))
         
     def UIe_btn_run(self, sender, e):
-        # get the email address
+        """Runs the script after the user clicks the button."""
         email_address = self.UI_txtEmail.Text
-        # get the subject line
         subject_line = self.UI_txtSubject.Text
-        # get the email body
         email_body = build_email_body(self.UI_txtDescription.Text)
-        # send the email
-        send_email(email_address, subject_line, email_body)
+        if email_address == "No_Email":
+            output.print_md("### Copy the report below and send it to your support team.")
+            print(subject_line)
+            print(email_body)
+        else:
+            send_email(email_address, subject_line, email_body)
         self.Close()
 
     def UIe_tag_selection(self, sender, e):
@@ -80,14 +82,16 @@ class SupportForm(Window):
         self.UI_txtSubject.Text = create_subject_line(
             selection,self.UI_txtSubject.Text)
 
+
 def send_email(email_address, subject_line, email_body):
     """Sends an email using the default email client.
     Args:
     email_address (str): The email address.
     subject_line (str): The email subject.
     email_body (str): The email body."""
+    email_body = System.Uri.EscapeDataString(email_body)
     mailto_link = create_mailto_link(email_address, subject_line, email_body)
-    subprocess.Popen(["start", mailto_link], shell=True)
+    os.startfile(mailto_link)
 
 def create_subject_line(tags, subject_line):
     """Creates the subject line for the email.
@@ -385,43 +389,31 @@ def build_email_body(body):
 Support Request
 ===============================================================================    
 Issue:
+
 {}
 
 ===============================================================================
+
 Revit Document Information
-
 Project Number: {}
-
 Document Name: {}
-
 Document Path: {}
-
 Active View: {}
 
 ===============================================================================
 System Information
 
 Revit Version: {}
-
 Operating System: {}
-
 Computer Name: {}
-
 Username: {}
-
 CPU Brand: {}
-
 CPU Threads: {}
-
 Total Memory: {}
-
 Memory Usage: {}
 ===============================================================================
 GPU Information
-
 {}
-
-
 """.format(
         get_issue_description(body),
         get_project_info_number(),
@@ -442,13 +434,7 @@ GPU Information
 
 if __name__ == "__main__":
     UI = SupportForm()
-    # config_xml_path = SupportConfig.get_config_xml_path(SupportConfig.file_to_xml("config.xml"))
-    # email_address = SupportConfig.get_default_email()
-    # hashtags = SupportConfig.get_hashtags(SupportConfig.file_to_xml(config_xml_path))
-    # subject = forms.ask_for_string(default="Support Request",
-    #                              prompt="Subject Line",
-    #                              title="Support Request")
-    # print(create_mailto_link(email_address, create_subject_line(hashtags, subject), build_email_body()))
+
 
 
 
