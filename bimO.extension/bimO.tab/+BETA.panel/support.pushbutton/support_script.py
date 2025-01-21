@@ -13,24 +13,81 @@ Author: Tay Othman, AIA"""
 
 import platform
 import datetime
-import os
-import System
 import subprocess
 import multiprocessing
 from pyrevit import HOST_APP, DB, revit, script, forms
 from support_config import SupportConfig
-import clr
+import os, wpf, clr
 clr.AddReference("System")
 clr.AddReference("System.Management")
 # clr.AddReference("IronPython.Modules")
+import System
 from System.Diagnostics import Process
 from System.Management import ManagementObjectSearcher
+from System.Windows import Window
+from System.Windows.Controls import TextBox, Button, Label, CheckBox, ListBox, ComboBox
+
 
 # Global Variables
 doc = revit.doc
 output = script.get_output()
 divider = "-" * 50
-hashtags = ["#Revit", "#BIM", "#Python", "#Support"]
+
+class SupportForm(Window):
+    def __init__(self):
+        form_path = os.path.join(os.path.dirname(__file__), "form.xaml")
+        wpf.LoadComponent(self, form_path)
+        self.UI_txtEmail.Text = SupportConfig.get_default_email()
+        self.UI_txtSubject.Text = "Support Request"
+        self.populate_hashtags()
+        self.ShowDialog()
+    
+    def populate_hashtags(self):
+        """Populates the hashtags listbox."""
+        [self.UI_Tag1.Content,
+         self.UI_Tag2.Content,
+         self.UI_Tag3.Content,
+         self.UI_Tag4.Content,
+         self.UI_Tag5.Content,
+         self.UI_Tag6.Content,
+         self.UI_Tag7.Content,
+         self.UI_Tag8.Content] = (
+             SupportConfig.get_hashtags(SupportConfig.
+                                file_to_xml("config.xml")))
+        
+    def UIe_btn_run(self, sender, e):
+        # get the email address
+        email_address = self.UI_txtEmail.Text
+        # get the subject line
+        subject_line = self.UI_txtSubject.Text
+        # get the email body
+        email_body = build_email_body(self.UI_txtDescription.Text)
+        # send the email
+        send_email(email_address, subject_line, email_body)
+        self.Close()
+
+    def UIe_tag_selection(self, sender, e):
+        selection = []
+        selected_tags = self.UI_Tags.SelectedItems
+        for tag in selected_tags:
+            string_tag = tag.Content
+            selection.append(string_tag)
+        create_subject_line(selection, self.UI_txtSubject.Text)
+        subject_line = self.UI_txtSubject.Text
+        subject_segments = subject_line.split("|")
+        last_segment = subject_segments[-1].strip()
+        self.UI_txtSubject.Text = last_segment
+        self.UI_txtSubject.Text = create_subject_line(
+            selection,self.UI_txtSubject.Text)
+
+def send_email(email_address, subject_line, email_body):
+    """Sends an email using the default email client.
+    Args:
+    email_address (str): The email address.
+    subject_line (str): The email subject.
+    email_body (str): The email body."""
+    mailto_link = create_mailto_link(email_address, subject_line, email_body)
+    subprocess.Popen(["start", mailto_link], shell=True)
 
 def create_subject_line(tags, subject_line):
     """Creates the subject line for the email.
@@ -40,7 +97,6 @@ def create_subject_line(tags, subject_line):
     combined_subject = "{} | {}".format(
         (" | ".join(tags)), subject_line)
     return combined_subject
-
 
 def create_mailto_link(email, subject, body):
     """Creates a mailto link.
@@ -53,15 +109,11 @@ def create_mailto_link(email, subject, body):
     mailto_link = "mailto:" + email + "?subject=" + subject + "&body=" + body
     return mailto_link
 
-def get_issue_description():
+def get_issue_description(body):
     """Gets the issue description from the user.
     Returns:
     str: The issue description."""
-    issue_description = forms.ask_for_string(
-        default="Please describe the issue you are experiencing",
-        prompt="Issue Description",
-        title="Support Request")
-    return issue_description
+    return body
 
 def get_current_time():
     """Gets the current time.
@@ -322,7 +374,7 @@ def collect_document_info():
     }
     return document_info
 
-def build_email_body():
+def build_email_body(body):
     """Builds the email body.
     Returns:
     str: The email body."""
@@ -371,7 +423,7 @@ GPU Information
 
 
 """.format(
-        get_issue_description(),
+        get_issue_description(body),
         get_project_info_number(),
         document_info['Document Name'],
         document_info['Document Path'],
@@ -389,13 +441,14 @@ GPU Information
     return email_body
 
 if __name__ == "__main__":
-    config_xml_path = SupportConfig.get_config_xml_path(SupportConfig.file_to_xml("config.xml"))
-    email_address = SupportConfig.get_default_email()
-    hashtags = SupportConfig.get_hashtags(SupportConfig.file_to_xml(config_xml_path))
-    subject = forms.ask_for_string(default="Support Request",
-                                 prompt="Subject Line",
-                                 title="Support Request")
-    print(create_mailto_link(email_address, create_subject_line(hashtags, subject), build_email_body()))
+    UI = SupportForm()
+    # config_xml_path = SupportConfig.get_config_xml_path(SupportConfig.file_to_xml("config.xml"))
+    # email_address = SupportConfig.get_default_email()
+    # hashtags = SupportConfig.get_hashtags(SupportConfig.file_to_xml(config_xml_path))
+    # subject = forms.ask_for_string(default="Support Request",
+    #                              prompt="Subject Line",
+    #                              title="Support Request")
+    # print(create_mailto_link(email_address, create_subject_line(hashtags, subject), build_email_body()))
 
 
 
