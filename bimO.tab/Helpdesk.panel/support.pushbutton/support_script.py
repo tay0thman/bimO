@@ -333,6 +333,14 @@ def get_revit_version():
     except Exception as e:
         return "Error: {}".format(str(e))
 
+def get_revit_addins():
+    loaded_apps = [] #type: List[str]
+    for app in __revit__.LoadedApplications:
+        loaded_apps.append(app.GetType().FullName)
+        loaded_apps = sorted(loaded_apps)
+        loaded_apps_str = "\n".join(loaded_apps)
+    return loaded_apps_str
+
 def collect_system_info():
     """Collects the system information.
     Returns:
@@ -393,8 +401,8 @@ Issue:
 {}
 
 ===============================================================================
-
 Revit Document Information
+
 Project Number: {}
 Document Name: {}
 Document Path: {}
@@ -413,6 +421,11 @@ Total Memory: {}
 Memory Usage: {}
 ===============================================================================
 GPU Information
+
+{}
+===============================================================================
+Loaded Addins
+
 {}
 """.format(
         get_issue_description(body),
@@ -428,7 +441,8 @@ GPU Information
         system_info['CPU Cores'],
         system_info['Total Memory'],
         system_info['Memory Usage'],
-        tabulate_gpu_info(collect_gpu_info())
+        tabulate_gpu_info(collect_gpu_info()),
+        get_revit_addins()
     )
     return email_body
 
