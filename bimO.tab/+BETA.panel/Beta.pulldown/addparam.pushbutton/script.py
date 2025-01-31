@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 # Created by Vasile Corjan
+# pylint: disable=import-error,invalid-name,broad-except,superfluous-parens
+# pylance: reportGeneralTypeIssues=false , reportUnknownArgumentType=false, reportUnknownKeywordArgument=false
+
 import System
 from System import Enum
 from pyrevit import forms, script, DB, revit
