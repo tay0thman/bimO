@@ -1,0 +1,44 @@
+#using RevitAPI + Python3
+#Get Rooms collector
+
+import clr
+# Import DocumentManager and TransactionManager
+clr.AddReference("RevitServices")
+import RevitServices
+from RevitServices.Persistence import DocumentManager
+from RevitServices.Transactions import TransactionManager
+
+# Import RevitAPI
+clr.AddReference("RevitAPI")
+import Autodesk.Revit.DB as DB
+from Autodesk.Revit.DB import *
+clr.AddReference('RevitAPIUI')
+from Autodesk.Revit.UI import *
+
+
+uiapp = DocumentManager.Instance.CurrentUIApplication
+app = uiapp.Application
+uidoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument
+doc = uidoc.Document
+all_rooms = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_Rooms).WhereElementIsNotElementType().ToElements()
+room_numbers = []
+room_names = []
+room_keys = []
+for room in all_rooms:
+    room_numbers.append(room.Number)
+    room_names.append(room.GetParameters("Name")[0].AsString())
+    room_keys.append(str(room.Number) + " - " + room.GetParameters("Name")[0].AsString())
+
+rooms = dict(zip(room_keys, all_rooms))
+sorted_rooms = sorted(rooms.keys())
+OUT = rooms
+
+# create swap values
+swap_values = {}
+swap_numbers = []
+swap_names = []
+for room in all_rooms:
+    swap_numbers.append(room.GetParameters("Name")[0].AsString())
+    swap_names.append(room.Number)
+    swap_values = dict(zip(swap_numbers, swap_names))
+OUT = swap_values
