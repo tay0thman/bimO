@@ -334,6 +334,9 @@ def get_revit_version():
         return "Error: {}".format(str(e))
 
 def get_revit_addins():
+    """Gets the loaded add-ins in Revit.
+    Returns:
+    str: The loaded add-ins in Revit."""
     loaded_apps = [] #type: List[str]
     for app in __revit__.LoadedApplications:
         loaded_apps.append(app.GetType().FullName)
