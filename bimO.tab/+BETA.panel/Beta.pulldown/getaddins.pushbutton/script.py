@@ -2,18 +2,20 @@
 
 #============================================ IMPORTS
 
-#Revit API
-import sys
-from Autodesk.Revit.DB import *
 
 #.NET Imports
 import clr
-clr.AddReference('System')
 clr.AddReference('RevitAPI')
-clr.AddReference('RevittAPIUI')
-from Autodesk.Revit.UI import *
 from Autodesk.Revit.DB import *
+clr.AddReference('RevitAPIUI')
+from Autodesk.Revit.UI import *
+from pyrevit import revit, DB, UI
 
-uiapp = Autodesk.Revit.UI.UIApplication.ActiveAddInId
+loaded_apps = []
+for app in __revit__.LoadedApplications:
+    loaded_apps.append(app)
 
-print(uiapp)
+sorted_apps = sorted(loaded_apps, key=lambda x: x.GetType().FullName)
+for app in sorted_apps:
+    print(app.GetType().FullName)
+
