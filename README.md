@@ -1,2 +1,2 @@
 # bimO
- BIM extension tools for Pyrevit
+ Quick Tools extension to pyrevit
