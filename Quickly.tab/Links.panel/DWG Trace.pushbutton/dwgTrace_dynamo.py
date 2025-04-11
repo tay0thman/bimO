@@ -1,9 +1,18 @@
 # -*- coding: utf-8 -*-
-from pyrevit import revit, DB, forms, script, HOST_APP, UI
+import clr
+
+clr.AddReference("RevitAPI")
+clr.AddReference("RevitServices")
+clr.AddReference("RevitAPIUI")
+from Autodesk.Revit.UI import UIApplication
+import Autodesk.Revit.DB as DB
+from Autodesk.Revit.DB import *
+from RevitServices.Persistence import DocumentManager
 from System.Collections.Generic import List, ICollection
 
-doc = revit.doc
-uidoc = revit.uidoc
+doc = DocumentManager.Instance.CurrentDBDocument
+uidoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument
+
 
 def create_detail_lines_from_geometry(geometry_elements):
     """Create detail lines from the geometry of an import instance.
@@ -26,7 +35,6 @@ def create_detail_lines_from_geometry(geometry_elements):
                         pass  # create detail line
                     except Exception as e:
                         print("{} {}".format("Skipped>>", e))
-                        pass
             elif "Arc" in str(g):
                 x = doc.Create.NewDetailCurve(doc.ActiveView, DB.Arc.Clone(g))
             elif "Ellipse" in str(g):
@@ -48,6 +56,17 @@ def create_detail_lines_from_geometry(geometry_elements):
                 ids.append(x.Id)
     return ids
 
+def apply_graphics_style_to_lines(graphics_style, lines):
+    """Apply a graphics style to the created detail lines.
+    args:
+        graphics_style: The graphics style to apply.
+        lines: The created detail lines."""
+    if graphics_style and lines:
+        # Apply the graphics style to the detail lines
+        for line in lines:
+            line.LineStyle = graphics_style
+
+
 def create_filled_region(solid):
     """Create a filled region from the geometry of an import instance.
     args:
@@ -57,12 +76,12 @@ def create_filled_region(solid):
     curveloop = []
     face_array = solid.Faces
     for i in range(face_array.Size):
-        face = face_array.Item[i]
+        face = face_array.get_Item(i)
         loops = face.GetEdgesAsCurveLoops()
         for loop in loops:
             curveloop.append(loop)
     # Create a filled region type if it doesn't exist
-    filled_region_type = DB.FilteredElementCollector(doc).OfClass(DB.FilledRegionType).FirstElement()
+    filled_region_type = UnwrapElement(IN[2])
     if not filled_region_type:
         forms.alert("No Filled Region Type found in the document.", exitscript=True)
     try:
@@ -89,30 +108,31 @@ def get_import_instance():
     import_instances = collector.ToElements()
     return import_instances
 
-#prompt to select an Import Instance
-selection = revit.pick_element(
-    "Select an Import Instance to get its geometry")
-if not selection:
-    forms.alert("No import instance selected.", exitscript=True)
-else:
-    # Get the selected import instance geometry
-    import_instance = selection
-    if not isinstance(import_instance, DB.ImportInstance):
-        forms.alert("Selected element is not an Import Instance.", exitscript=True)
-    # Get the geometry of the import instance
-    geometry = import_instance.get_Geometry(DB.Options())
+import_instance = UnwrapElement(IN[0])
+line_graphics_style = UnwrapElement(IN[1])
+halftone = IN[3]
+if halftone:
+        # construct halftone override graphic settings
+        halftone = DB.OverrideGraphicSettings()
+        halftone.SetHalftone(True)
 
+geometry = import_instance.get_Geometry(Options())
 geometry_elements = []
 for geom in geometry:
     for g in geom.GetInstanceGeometry():
         geometry_elements.append(g)
-t = DB.Transaction(doc, "Trace Import Instance Geometry")
+t = Transaction(doc, "Trace Import Instance Geometry")
 t.Start()
-x = create_detail_lines_from_geometry(geometry_elements)
+x = create_detail_lines_from_geometry(geometry_elements) #type: List[ElementId]
+if x:
+    # get the elements of the lines created
+    x_elements = []
+    for i in x:
+        x_elements.append(doc.GetElement(i))
+    apply_graphics_style_to_lines(line_graphics_style, x_elements)
+
+if halftone:
+        doc.ActiveView.SetElementOverrides(import_instance.Id, halftone)
 t.Commit()
 if x:
-    # convert the list of element ids to Icollection
-    dotnet_list = List[DB.ElementId](x)
-    # assign to ICollection
-    icoll = dotnet_list  # List[DB.ElementId] already implements ICollection
-    uidoc.Selection.SetElementIds(icoll)
+    OUT = x_elements
