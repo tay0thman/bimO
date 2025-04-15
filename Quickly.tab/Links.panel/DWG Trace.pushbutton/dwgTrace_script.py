@@ -89,6 +89,24 @@ def get_import_instance():
     import_instances = collector.ToElements()
     return import_instances
 
+def query_filled_region_types():
+    """Query the filled region type from the user.
+    return: The filled region type."""
+    return DB.FilteredElementCollector(doc).\
+                    OfClass(DB.FilledRegionType).\
+                    WhereElementIsElementType().\
+                    ToElements()
+
+def query_line_styles():
+    """Query the line styles from the revit document.
+    return: Graphic Style Id."""
+    return DB.FilteredElementCollector(doc).OfClass(DB.GraphicsStyle).ToElements()
+
+
+print(query_line_styles())
+print(query_filled_region_types())
+script.exit
+
 #prompt to select an Import Instance
 selection = revit.pick_element(
     "Select an Import Instance to get its geometry")
