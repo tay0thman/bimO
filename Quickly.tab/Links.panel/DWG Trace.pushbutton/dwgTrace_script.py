@@ -6,6 +6,7 @@ from System.Collections.Generic import List
 
 from rpw.ui.forms import FlexForm, Label, Separator, Button, ComboBox, CheckBox
 
+author = "Tay Othman"
 
 doc = revit.doc
 uidoc = revit.uidoc
