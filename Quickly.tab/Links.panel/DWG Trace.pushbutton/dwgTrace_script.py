@@ -51,8 +51,12 @@ def create_detail_lines_from_geometry(
                 if "DIM" in str(style_cat.Name):
                     pass
                 else:
-                    x = doc.Create.NewDetailCurve(doc.ActiveView, DB.Line.Clone(g))
-                    x.LineStyle = line_style
+                    try:
+                        x = doc.Create.NewDetailCurve(doc.ActiveView, DB.Line.Clone(g))
+                        x.LineStyle = line_style
+                    except Exception as e:
+                        print("{} {}".format("Skipped>>", e))
+                        pass
             elif "Curve" in str(g):
                 x = doc.Create.NewDetailCurve(doc.ActiveView, DB.Curve.Clone(g))
                 x.LineStyle = line_style
