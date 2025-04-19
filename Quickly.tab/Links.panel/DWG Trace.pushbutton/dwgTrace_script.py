@@ -21,6 +21,17 @@ def create_detail_lines_from_geometry(
     x = None
 
     for g in geometry_elements:
+            try:
+                styleid = g.GraphicsStyleId
+                stylecat = doc.GetElement(styleid).GraphicsStyleCategory
+                # get the category name
+                catname = stylecat.Name
+                #get category lineweight
+                lineweight = stylecat.LineWeight
+                print("Category Name:", lineweight)
+            except Exception as e:
+                print("{} {}".format("Skipped>>", e))
+
             if "PolyLine" in str(g):
                 polyline = DB.PolyLine.Clone(g)
                 # get coordinates of the polyline
