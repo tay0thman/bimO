@@ -1,14 +1,42 @@
 #! python3
 import sys
+import os
 import random
-from pyrevit import script
+import ctypes
+
+# --- PATCH: FIX SYS.PATH FOR COMPILED LOADER ---
+try:
+    import pyrevit
+except ImportError:
+    # 1. Find the path that contains the CPython Engine
+    engine_path = next((p for p in sys.path if "pyRevit-Master" in p and "cengines" in p), None)
+    
+    if engine_path:
+        # 2. Derive the root 'pyrevitlib' folder
+        root_path = engine_path.split(r"\bin")[0]
+        lib_path = os.path.join(root_path, "pyrevitlib")
+        site_path = os.path.join(root_path, "site-packages")
+
+        # 3. Inject into sys.path
+        if os.path.exists(lib_path) and lib_path not in sys.path:
+            sys.path.append(lib_path)
+        if os.path.exists(site_path) and site_path not in sys.path:
+            sys.path.append(site_path)
+
+# Now we can safely import
+try:
+    from pyrevit import script
+except ImportError:
+    ctypes.windll.user32.MessageBoxW(0, "Still cannot find 'pyrevitlib'.", "Critical Error", 0)
+    sys.exit()
+
+# --- END PATCH ---
 
 # Get the output window object
 output = script.get_output()
 
-# --- CONFIGURATION ---
+# --- GRAPHICS CONFIGURATION ---
 MATRIX_CHARS = ["0", "1", "ï", "ç", "§", "£", "¢", "¬", "µ", "¶"]
-# HTML Colors
 COLOR_CPYTHON = "#00FF41" # Matrix Green
 COLOR_IRON = "#FF4500"    # Orange Red
 COLOR_BG = "#0D0208"      # Dark background
@@ -21,8 +49,7 @@ def render_header(is_cpython):
         status_text = "CPYTHON LOADER: ACTIVE"
         sub_text = "Kernel: v{} | Encoding: UTF-8".format(version_info)
         theme_color = COLOR_CPYTHON
-        # Simple ASCII Art for Success
-        art = """
+        art = r"""
 <pre style="font-family:monospace; line-height:10px; font-weight:bold;">
       _______   _______ 
      /  ____|  |  __   \ 
@@ -34,9 +61,9 @@ def render_header(is_cpython):
         """
     else:
         status_text = "IRONPYTHON DETECTED"
-        sub_text = "Kernel: v{} | This is not the CPython loader.".format(version_info)
+        sub_text = "Kernel: v{} | Standard pyRevit Engine".format(version_info)
         theme_color = COLOR_IRON
-        art = """
+        art = r"""
 <pre style="font-family:monospace; line-height:10px; font-weight:bold;">
       ______   ______ 
      |  ____| |  ____|
@@ -47,7 +74,6 @@ def render_header(is_cpython):
 </pre>
         """
 
-    # CSS Styling for the box
     style = """
         background-color: {};
         color: {};
@@ -66,16 +92,21 @@ def render_header(is_cpython):
     </div>
     """.format(style=style, art=art, status=status_text, sub=sub_text)
 
-    output.print_html(html)
+    # Safety check for print_html vs older methods
+    if hasattr(output, 'print_html'):
+        output.print_html(html)
+    else:
+        # Fallback for very raw wrappers
+        print(status_text)
+        print(sub_text)
 
 def render_matrix_rain():
-    """Generates a random stream of characters to test performance/encoding."""
-    # We generate a block of HTML spans with varying opacities to simulate 'rain'
+    """Generates a random stream of characters."""
     stream_html = "<div style='background-color:#000; padding:10px; font-family:monospace; overflow-x:hidden;'>"
     
-    for i in range(10): # Number of lines
+    for i in range(10): 
         line = ""
-        for j in range(40): # Width
+        for j in range(40): 
             char = random.choice(MATRIX_CHARS)
             opacity = random.uniform(0.3, 1.0)
             size = random.randint(10, 16)
@@ -83,30 +114,32 @@ def render_matrix_rain():
         stream_html += "<div style='line-height:12px'>{}</div>".format(line)
     
     stream_html += "</div>"
-    output.print_html(stream_html)
+    
+    if hasattr(output, 'print_html'):
+        output.print_html(stream_html)
 
 # --- MAIN EXECUTION ---
 
-# 1. Clear previous output
-output.wipe()
+# REMOVED: output.wipe() cause attribute error in this environment
 
-# 2. Check Implementation
-# 'cpython' vs 'ironpython'
+# Check Implementation
 try:
-    # sys.implementation is available in Python 3 (CPython) and recent IronPython 3
-    # standard IronPython 2.7 does not have sys.implementation
-    impl_name = sys.implementation.name.lower()
+    is_cpython = (sys.implementation.name.lower() == 'cpython')
 except AttributeError:
-    impl_name = "ironpython"
+    is_cpython = False
 
-is_cpython_verified = (impl_name == 'cpython')
+# Render
+render_header(is_cpython)
 
-# 3. Render Output
-render_header(is_cpython_verified)
-
-if is_cpython_verified:
-    output.print_html("<br><h3>Initializing Graphics Subsystem...</h3>")
-    render_matrix_rain()
-    output.print_html("<br><div style='color:#fff; background-color:green; padding:5px; text-align:center'>LOADER TEST PASSED</div>")
+if is_cpython:
+    if hasattr(output, 'print_html'):
+        output.print_html("<br><h3>Initializing Graphics Subsystem...</h3>")
+        render_matrix_rain()
+        output.print_html("<br><div style='color:#fff; background-color:green; padding:5px; text-align:center'>LOADER TEST PASSED</div>")
+    else:
+        print("LOADER TEST PASSED (HTML Output Not Supported)")
 else:
-    output.print_html("<br><div style='color:#fff; background-color:red; padding:5px; text-align:center'>LOADER TEST FAILED (Running IronPython)</div>")
+    if hasattr(output, 'print_html'):
+        output.print_html("<br><div style='color:#fff; background-color:red; padding:5px; text-align:center'>LOADER TEST FAILED (Running IronPython)</div>")
+    else:
+        print("LOADER TEST FAILED (Running IronPython)")
