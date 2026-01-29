@@ -26,8 +26,8 @@ import ctypes
 # Now we can safely import
 try:
     from pyrevit import script
-except ImportError:
-    ctypes.windll.user32.MessageBoxW(0, "Still cannot find 'pyrevitlib'.", "Critical Error", 0)
+except ImportError as e:
+    ctypes.windll.user32.MessageBoxW(0, "Still cannot find 'pyrevitlib'.\n\nError: {}".format(e), "Critical Error", 0)
     sys.exit()
 
 # --- END PATCH ---
@@ -137,7 +137,7 @@ if is_cpython:
         render_matrix_rain()
         output.print_html("<br><div style='color:#fff; background-color:green; padding:5px; text-align:center'>LOADER TEST PASSED</div>")
     else:
-        print("LOADER TEST PASSED (HTML Output Not Supported)")
+        print("LOADER TEST PASSED!!! (HTML Output Not Supported)")
 else:
     if hasattr(output, 'print_html'):
         output.print_html("<br><div style='color:#fff; background-color:red; padding:5px; text-align:center'>LOADER TEST FAILED (Running IronPython)</div>")
