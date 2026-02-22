@@ -26,8 +26,8 @@ except ImportError:
 # Now we can safely import
 try:
     from pyrevit import script
-except ImportError:
-    ctypes.windll.user32.MessageBoxW(0, "Still cannot find 'pyrevitlib'.", "Critical Error", 0)
+except ImportError as e:
+    ctypes.windll.user32.MessageBoxW(0, "Still cannot find 'pyrevitlib'.\n\nError: {}".format(e), "Critical Error", 0)
     sys.exit()
 
 # --- END PATCH ---

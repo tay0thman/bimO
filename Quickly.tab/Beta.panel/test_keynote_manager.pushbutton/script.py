@@ -1,0 +1,1485 @@
+# -*- coding: utf-8 -*-
+"""Manage project keynotes — unified tree with hierarchy controls.
+
+Features:
+- Single hierarchical tree (no separate category sidebar)
+- Indent / Outdent to promote or demote nodes (Tab / Shift+Tab)
+- Move Up / Move Down to reorder siblings (Ctrl+Up / Ctrl+Down)
+- Drag-and-drop to reparent across the tree
+- Search with smart filters
+- Keyboard shortcuts (F2, F5, Ctrl+N, Ctrl+D, Del, Tab, Shift+Tab)
+
+Shift+Click:
+Reset window configurations and open.
+"""
+#pylint: disable=E0401,W0613,C0111,C0103,C0302,W0703
+#pylint: disable=raise-missing-from
+import os
+import os.path as op
+import shutil
+import math
+from collections import defaultdict, OrderedDict
+from natsort import natsorted
+
+from pyrevit import HOST_APP
+from pyrevit import framework
+from pyrevit.framework import System, Windows
+from pyrevit import coreutils
+from pyrevit import revit, DB, UI
+from pyrevit import forms
+from pyrevit import script
+
+from pyrevit.runtime.types import DocumentEventUtils
+
+from pyrevit.interop import adc
+
+import keynotesdb as kdb
+
+logger = script.get_logger()
+output = script.get_output()
+
+
+# =============================================================================
+# HELPERS
+# =============================================================================
+
+def get_keynote_pcommands():
+    return list(reversed(
+        [x for x in coreutils.get_enum_values(UI.PostableCommand)
+         if str(x).endswith('Keynote')]))
+
+
+def _find_siblings(flat_keynotes, target_parent_key):
+    """Return natsorted list of keynotes sharing the same parent_key."""
+    return natsorted(
+        [k for k in flat_keynotes if k.parent_key == target_parent_key],
+        key=lambda x: x.key)
+
+
+def _find_parent_of(all_categories, all_keynotes, child):
+    """Find the RKeynote/category object that is the parent of 'child'."""
+    pkey = child.parent_key
+    if not pkey:
+        return None
+    for cat in all_categories:
+        if cat.key == pkey:
+            return cat
+    for kn in all_keynotes:
+        if kn.key == pkey:
+            return kn
+    return None
+
+
+# =============================================================================
+# EDIT RECORD WINDOW (unchanged from pyRevit — works with EditRecord.xaml)
+# =============================================================================
+
+class EditRecordWindow(forms.WPFWindow):
+    """Dialog for adding/editing a single keynote or category record."""
+
+    def __init__(self, owner, conn, mode,
+                 rkeynote=None, rkey=None, text=None, pkey=None):
+        forms.WPFWindow.__init__(self, 'EditRecord.xaml')
+        self.Owner = owner
+        self._res = None
+        self._commited = False
+        self._reserved_key = None
+
+        self._conn = conn
+        self._mode = mode
+        self._cat = False
+        self._rkeynote = rkeynote
+        self._rkey = rkey
+        self._text = text
+        self._pkey = pkey
+
+        if self._mode == kdb.EDIT_MODE_ADD_CATEG:
+            self._cat = True
+            self.hide_element(self.recordParentInput)
+            self.Title = "Add Group"
+            self.recordKeyTitle.Text = "Create a unique group key"
+            self.applyChanges.Content = "Add Group"
+
+        elif self._mode == kdb.EDIT_MODE_EDIT_CATEG:
+            self._cat = True
+            self.hide_element(self.recordParentInput)
+            self.Title = "Edit Group"
+            self.recordKeyTitle.Text = "Group key (read-only)"
+            self.applyChanges.Content = "Save Changes"
+            self.recordKey.IsEnabled = False
+            if self._rkeynote and self._rkeynote.key:
+                kdb.begin_edit(self._conn, self._rkeynote.key, category=True)
+
+        elif self._mode == kdb.EDIT_MODE_ADD_KEYNOTE:
+            self.show_element(self.recordParentInput)
+            self.Title = "Add Keynote"
+            self.recordKeyTitle.Text = "Create a unique keynote key"
+            self.applyChanges.Content = "Add Keynote"
+
+        elif self._mode == kdb.EDIT_MODE_EDIT_KEYNOTE:
+            self.show_element(self.recordParentInput)
+            self.Title = "Edit Keynote"
+            self.recordKeyTitle.Text = "Keynote key (read-only)"
+            self.applyChanges.Content = "Save Changes"
+            self.recordKey.IsEnabled = False
+            self.recordParent.IsEnabled = True
+            if self._rkeynote and self._rkeynote.key:
+                kdb.begin_edit(self._conn, self._rkeynote.key, category=False)
+
+        if self._rkeynote:
+            self.active_key = self._rkeynote.key
+            self.active_text = self._rkeynote.text
+            self.active_parent_key = self._rkeynote.parent_key
+        if self._rkey:
+            self.active_key = self._rkey
+        if self._text:
+            self.active_text = self._text
+        if self._pkey:
+            self.active_parent_key = self._pkey
+
+        self.recordText.Focus()
+        self.recordText.SelectAll()
+
+    @property
+    def active_key(self):
+        if self.recordKey.Content and u'\u25CF' not in self.recordKey.Content:
+            return self.recordKey.Content
+
+    @active_key.setter
+    def active_key(self, value):
+        self.recordKey.Content = value
+
+    @property
+    def active_text(self):
+        return self.recordText.Text
+
+    @active_text.setter
+    def active_text(self, value):
+        self.recordText.Text = value.strip()
+
+    @property
+    def active_parent_key(self):
+        return self.recordParent.Content
+
+    @active_parent_key.setter
+    def active_parent_key(self, value):
+        self.recordParent.Content = value
+
+    def commit(self):
+        if self._mode == kdb.EDIT_MODE_ADD_CATEG:
+            if not self.active_key:
+                forms.alert("Please provide a unique key."); return False
+            if not self.active_text.strip():
+                forms.alert("Please provide a title."); return False
+            try:
+                self._res = kdb.add_category(
+                    self._conn, self.active_key, self.active_text)
+                kdb.end_edit(self._conn)
+            except System.TimeoutException as toutex:
+                forms.alert(toutex.Message); return False
+
+        elif self._mode == kdb.EDIT_MODE_EDIT_CATEG:
+            if not self.active_text:
+                forms.alert("Title cannot be empty."); return False
+            try:
+                if self.active_text != self._rkeynote.text:
+                    kdb.update_category_title(
+                        self._conn, self.active_key, self.active_text)
+                kdb.end_edit(self._conn)
+            except System.TimeoutException as toutex:
+                forms.alert(toutex.Message); return False
+
+        elif self._mode == kdb.EDIT_MODE_ADD_KEYNOTE:
+            if not self.active_key:
+                forms.alert("Please provide a unique key."); return False
+            if not self.active_text:
+                forms.alert("Please provide keynote text."); return False
+            if not self.active_parent_key:
+                forms.alert("Please select a parent."); return False
+            try:
+                self._res = kdb.add_keynote(
+                    self._conn, self.active_key,
+                    self.active_text, self.active_parent_key)
+                kdb.end_edit(self._conn)
+            except System.TimeoutException as toutex:
+                forms.alert(toutex.Message); return False
+
+        elif self._mode == kdb.EDIT_MODE_EDIT_KEYNOTE:
+            if not self.active_text:
+                forms.alert("Keynote text cannot be empty."); return False
+            try:
+                if self.active_text != self._rkeynote.text:
+                    kdb.update_keynote_text(
+                        self._conn, self.active_key, self.active_text)
+                if self.active_parent_key != self._rkeynote.parent_key:
+                    kdb.move_keynote(
+                        self._conn, self.active_key, self.active_parent_key)
+                kdb.end_edit(self._conn)
+            except System.TimeoutException as toutex:
+                forms.alert(toutex.Message); return False
+
+        return True
+
+    def show(self):
+        self.ShowDialog()
+        return self._res
+
+    def pick_key(self, sender, args):
+        if self._reserved_key:
+            try:
+                kdb.release_key(self._conn, self._reserved_key,
+                                category=self._cat)
+            except System.TimeoutException as toutex:
+                forms.alert(toutex.Message); return
+        try:
+            categories = kdb.get_categories(self._conn)
+            keynotes = kdb.get_keynotes(self._conn)
+            locks = kdb.get_locks(self._conn)
+        except System.TimeoutException as toutex:
+            forms.alert(toutex.Message); return
+        reserved_keys = [x.key for x in categories]
+        reserved_keys.extend([x.key for x in keynotes])
+        reserved_keys.extend([x.LockTargetRecordKey for x in locks])
+        new_key = forms.ask_for_unique_string(
+            prompt="Enter a unique key:",
+            title=self.Title,
+            reserved_values=reserved_keys, owner=self)
+        if new_key:
+            try:
+                kdb.reserve_key(self._conn, new_key, category=self._cat)
+            except System.TimeoutException as toutex:
+                forms.alert(toutex.Message); return
+            self._reserved_key = new_key
+            self.active_key = new_key
+
+    def pick_parent(self, sender, args):
+        categories = kdb.get_categories(self._conn)
+        keynotes = kdb.get_keynotes(self._conn)
+        available = [x.key for x in categories]
+        available.extend([x.key for x in keynotes])
+        if self.active_key in available:
+            available.remove(self.active_key)
+        new_parent = forms.SelectFromList.show(
+            natsorted(available), title='Select Parent', multiselect=False)
+        if new_parent:
+            try:
+                kdb.reserve_key(self._conn, self.active_key,
+                                category=self._cat)
+            except System.TimeoutException as toutex:
+                forms.alert(toutex.Message); return
+            self._reserved_key = self.active_key
+            self.active_parent_key = new_parent
+
+    def to_upper(self, sender, args):
+        self.active_text = self.active_text.upper()
+
+    def to_lower(self, sender, args):
+        self.active_text = self.active_text.lower()
+
+    def to_title(self, sender, args):
+        self.active_text = self.active_text.title()
+
+    def to_sentence(self, sender, args):
+        self.active_text = self.active_text.capitalize()
+
+    def select_template(self, sender, args):
+        template = forms.SelectFromList.show(
+            ["RESERVED", "DO NOT USE"],
+            title="Select Template", owner=self)
+        if template:
+            self.active_text = template
+
+    def translate(self, sender, args):
+        forms.alert("Translation feature coming soon.")
+
+    def apply_changes(self, sender, args):
+        self._commited = self.commit()
+        if self._commited:
+            self.Close()
+
+    def cancel_changes(self, sender, args):
+        self.Close()
+
+    def window_closing(self, sender, args):
+        if not self._commited:
+            if self._reserved_key:
+                try:
+                    kdb.release_key(self._conn, self._reserved_key,
+                                    category=self._cat)
+                except Exception:
+                    pass
+            try:
+                kdb.end_edit(self._conn)
+            except Exception:
+                pass
+
+
+# =============================================================================
+# MAIN KEYNOTE MANAGER WINDOW
+# =============================================================================
+
+class KeynoteManagerWindow(forms.WPFWindow):
+    """Keynote manager with unified tree and hierarchy controls."""
+
+    def __init__(self, xaml_file_name, reset_config=False):
+        forms.WPFWindow.__init__(self, xaml_file_name)
+
+        self._kfile = None
+        self._kfile_handler = None
+        self._kfile_ext = None
+        self._conn = None
+
+        self._determine_kfile()
+        self._connect_kfile()
+
+        self._cache = []
+        self._needs_update = False
+        self._config = script.get_config()
+        self._used_keysdict = self.get_used_keynote_elements()
+
+        # drag state
+        self._drag_start_point = None
+        self._is_dragging = False
+
+        self.load_config(reset_config)
+        self._update_full_tree()
+        self._update_status_bar()
+        self.search_tb.Focus()
+
+    # =========================================================================
+    # PROPERTIES
+    # =========================================================================
+
+    @property
+    def window_geom(self):
+        return (self.Width, self.Height, self.Top, self.Left)
+
+    @window_geom.setter
+    def window_geom(self, geom_tuple):
+        w, h, t, l = geom_tuple
+        self.Width = self.Width if math.isnan(w) else w
+        self.Height = self.Height if math.isnan(h) else h
+        self.Top = self.Top if math.isnan(t) else t
+        self.Left = self.Left if math.isnan(l) else l
+
+    @property
+    def search_term(self):
+        return self.search_tb.Text
+
+    @search_term.setter
+    def search_term(self, value):
+        self.search_tb.Text = value
+
+    @property
+    def postable_keynote_command(self):
+        return get_keynote_pcommands()[self.postcmd_idx]
+
+    @property
+    def postcmd_options(self):
+        return [self.userknote_rb, self.materialknote_rb,
+                self.elementknote_rb]
+
+    @property
+    def postcmd_idx(self):
+        for idx, rb in enumerate(self.postcmd_options):
+            if rb.IsChecked:
+                return idx
+        return 0
+
+    @postcmd_idx.setter
+    def postcmd_idx(self, index):
+        self.postcmd_options[index if index else 0].IsChecked = True
+
+    @property
+    def selected_keynote(self):
+        return self.keynotes_tv.SelectedItem
+
+    @property
+    def current_keynotes(self):
+        return self.keynotes_tv.ItemsSource
+
+    @property
+    def all_categories(self):
+        try:
+            return kdb.get_categories(self._conn)
+        except System.TimeoutException as toutex:
+            forms.alert(toutex.Message); return []
+
+    @property
+    def all_keynotes(self):
+        try:
+            return kdb.get_keynotes(self._conn)
+        except System.TimeoutException as toutex:
+            forms.alert(toutex.Message); return []
+
+    # =========================================================================
+    # STATUS BAR
+    # =========================================================================
+
+    def _update_status_bar(self):
+        if self._kfile:
+            fname = op.basename(self._kfile)
+            handler = ' (BIM 360)' if self._kfile_handler == 'adc' else ''
+            self.statusLeft.Text = u"{}{} \u2014 {}".format(
+                fname, handler, op.dirname(self._kfile))
+        else:
+            self.statusLeft.Text = "No keynote file loaded"
+
+        try:
+            cats = self.all_categories if self._conn else []
+            knotes = self.all_keynotes if self._conn else []
+            used = len(self._used_keysdict)
+            self.statusRight.Text = \
+                u"{} groups \u00B7 {} keynotes \u00B7 {} in use".format(
+                    len(cats), len(knotes), used)
+        except Exception:
+            self.statusRight.Text = ""
+
+    # =========================================================================
+    # USED KEYNOTE TRACKING
+    # =========================================================================
+
+    def get_used_keynote_elements(self):
+        used = defaultdict(list)
+        try:
+            for kn in revit.query.get_used_keynotes(doc=revit.doc):
+                key = kn.Parameter[DB.BuiltInParameter.KEY_VALUE].AsString()
+                used[key].append(kn.Id)
+        except Exception as ex:
+            logger.debug('get_used_keynotes failed | %s' % ex)
+        return used
+
+    # =========================================================================
+    # CONFIG
+    # =========================================================================
+
+    def save_config(self):
+        wg = {}
+        for k, v in self._config.get_option('last_window_geom', {}).items():
+            if op.exists(k):
+                wg[k] = v
+        wg[self._kfile] = self.window_geom
+        self._config.set_option('last_window_geom', wg)
+
+        pc = {}
+        for k, v in self._config.get_option('last_postcmd_idx', {}).items():
+            if op.exists(k):
+                pc[k] = v
+        pc[self._kfile] = self.postcmd_idx
+        self._config.set_option('last_postcmd_idx', pc)
+
+        st = {}
+        if self.search_term:
+            st[self._kfile] = self.search_term
+        self._config.set_option('last_search_term', st)
+
+        script.save_config()
+
+    def load_config(self, reset):
+        wg = {} if reset else self._config.get_option(
+            'last_window_geom', {})
+        if wg and self._kfile in wg:
+            w, h, t, l = wg[self._kfile]
+        else:
+            w, h, t, l = (None, None, None, None)
+        if all([w, h, t, l]) \
+                and coreutils.is_box_visible_on_screens(l, t, w, h):
+            self.window_geom = (w, h, t, l)
+        else:
+            self.WindowStartupLocation = \
+                framework.Windows.WindowStartupLocation.CenterScreen
+
+        pc = {} if reset else self._config.get_option(
+            'last_postcmd_idx', {})
+        self.postcmd_idx = pc.get(self._kfile, 0)
+
+        st = {} if reset else self._config.get_option(
+            'last_search_term', {})
+        self.search_term = st.get(self._kfile, "")
+
+    # =========================================================================
+    # KEYNOTE FILE CONNECTION
+    # =========================================================================
+
+    def _determine_kfile(self):
+        self._kfile = revit.query.get_local_keynote_file(doc=revit.doc)
+        self._kfile_handler = None
+        self._kfile_ext = None
+
+        if not self._kfile:
+            self._kfile_ext = \
+                revit.query.get_external_keynote_file(doc=revit.doc)
+            self._kfile_handler = 'unknown'
+
+        if self._kfile_ext and self._kfile_handler == 'unknown':
+            if adc.is_available():
+                self._kfile_handler = 'adc'
+                try:
+                    local_kfile = adc.get_local_path(self._kfile_ext)
+                    if local_kfile:
+                        try:
+                            locked, owner = adc.is_locked(self._kfile_ext)
+                            if locked:
+                                forms.alert(
+                                    "File locked by {}."
+                                    .format(owner), exitscript=True)
+                        except Exception as lockex:
+                            logger.debug('ADC lock check | %s' % lockex)
+                        try:
+                            adc.sync_file(self._kfile_ext)
+                            adc.lock_file(self._kfile_ext)
+                        except Exception as syncex:
+                            logger.debug('ADC sync/lock | %s' % syncex)
+                        self._kfile = local_kfile
+                        self.Title += ' (BIM 360)'
+                    else:
+                        forms.alert(
+                            "Cannot resolve local path via {}."
+                            .format(adc.ADC_NAME), exitscript=True)
+                except Exception as adcex:
+                    logger.debug('ADC failed | %s' % adcex)
+                    forms.alert(
+                        "ADC communication failed.\n{}".format(adcex),
+                        exitscript=True)
+            else:
+                forms.alert(
+                    "{} is not available.".format(adc.ADC_NAME),
+                    exitscript=True)
+
+    def _change_kfile(self):
+        kfile = forms.pick_file('txt')
+        if kfile:
+            try:
+                with revit.Transaction("Set Keynote File"):
+                    revit.update.set_keynote_file(kfile, doc=revit.doc)
+            except Exception as ex:
+                forms.alert(str(ex))
+
+    def _connect_kfile(self):
+        if not self._kfile or not op.exists(self._kfile):
+            self._kfile = None
+            forms.alert("Keynote file not found. Select a valid file.")
+            self._change_kfile()
+            self._determine_kfile()
+        if not self._kfile:
+            raise Exception("No keynote file set for this project.")
+        if not os.access(self._kfile, os.W_OK):
+            raise Exception("Keynote file is read-only:\n" + self._kfile)
+        try:
+            self._conn = kdb.connect(self._kfile)
+        except System.TimeoutException as toutex:
+            forms.alert(toutex.Message, exitscript=True)
+        except Exception as ex:
+            logger.debug('Connection failed | %s' % ex)
+            res = forms.alert(
+                "Cannot connect to keynote file.\n"
+                "It may need conversion to the new format.",
+                options=["Convert", "Select Other", "Help"])
+            if res == "Convert":
+                try:
+                    self._convert_existing()
+                    forms.alert("Converted! Please relaunch.")
+                    if not self._conn:
+                        forms.alert("Relaunch required.", exitscript=True)
+                except Exception as convex:
+                    forms.alert("Conversion failed: %s" % convex,
+                                exitscript=True)
+            elif res == "Select Other":
+                self._change_kfile()
+                self._determine_kfile()
+            elif res == "Help":
+                script.open_url(
+                    "https://www.notion.so/pyrevitlabs/"
+                    "Manage-Keynotes-6f083d6f66fe43d68dc5d5407c8e19da")
+                script.exit()
+            else:
+                forms.alert("No valid keynote file.", exitscript=True)
+
+    def _convert_existing(self):
+        temp = script.get_data_file(op.basename(self._kfile), 'bak')
+        if op.exists(temp):
+            script.remove_data_file(temp)
+        try:
+            shutil.copy(self._kfile, temp)
+        except Exception:
+            raise Exception("Backup failed.")
+        try:
+            open(self._kfile, 'w').close()
+        except Exception:
+            raise Exception("File preparation failed.")
+        try:
+            self._conn = kdb.connect(self._kfile)
+            kdb.import_legacy_keynotes(self._conn, temp, skip_dup=True)
+        except Exception as ex:
+            shutil.copy(temp, self._kfile)
+            raise ex
+        finally:
+            script.remove_data_file(temp)
+
+    # =========================================================================
+    # TREE BUILDING — UNIFIED (categories + keynotes in one tree)
+    # =========================================================================
+
+    def _build_full_tree(self):
+        """Build a single tree: categories at root, keynotes nested by
+        parent_key.  Returns the root-level list of RKeynote objects
+        with children populated recursively."""
+        try:
+            categories = kdb.get_categories(self._conn)
+            all_knotes = kdb.get_keynotes(self._conn)
+        except System.TimeoutException as toutex:
+            forms.alert(toutex.Message)
+            return []
+        except Exception as ex:
+            forms.alert("Error loading keynotes:\n%s" % ex,
+                        exitscript=True)
+            return []
+
+        # Build parent -> children map from keynotes
+        cat_keys = set(c.key for c in categories)
+        children_map = defaultdict(list)
+        for kn in all_knotes:
+            if kn.parent_key:
+                children_map[kn.parent_key].append(kn)
+
+        # Recursive child population
+        def _populate(node):
+            node_children = natsorted(
+                children_map.get(node.key, []), key=lambda x: x.key)
+            # Replace the children list (clear first to avoid dupes)
+            while node.children:
+                node.children.pop()
+            for child in node_children:
+                _populate(child)
+                node.children.append(child)
+
+        # Root-level: categories
+        roots = natsorted(categories, key=lambda x: x.key)
+        for root in roots:
+            _populate(root)
+
+        # Also find keynotes whose parent_key is a category
+        # but weren't caught above (edge case: orphans)
+        all_parented = set()
+        for kids in children_map.values():
+            for k in kids:
+                all_parented.add(k.key)
+
+        return roots
+
+    def _update_full_tree(self, fast_filter=False):
+        """Refresh the single unified tree, applying search filter."""
+        keynote_filter = self.search_term if self.search_term else None
+
+        # Update view-only filter keys
+        if keynote_filter \
+                and kdb.RKeynoteFilters.ViewOnly.code in keynote_filter:
+            visible_keys = [
+                x.TagText for x in
+                revit.query.get_visible_keynotes(revit.active_view)]
+            kdb.RKeynoteFilters.ViewOnly.set_keys(visible_keys)
+
+        if fast_filter and keynote_filter:
+            tree = list(self._cache)
+        else:
+            tree = self._build_full_tree()
+
+        # Mark used
+        for node in tree:
+            node.update_used(self._used_keysdict)
+
+        # Cache for fast re-filter
+        self._cache = list(tree)
+
+        # Apply search filter
+        if keynote_filter:
+            clean = keynote_filter.lower()
+            tree = [n for n in tree if n.filter(clean)]
+
+        self.keynotes_tv.ItemsSource = tree
+
+        if tree:
+            self.emptyStateMsg.Visibility = Windows.Visibility.Collapsed
+        else:
+            self.emptyStateMsg.Visibility = Windows.Visibility.Visible
+
+    # =========================================================================
+    # BUTTON STATE
+    # =========================================================================
+
+    def _update_buttons(self):
+        """Enable/disable toolbar buttons based on selection."""
+        sel = self.selected_keynote
+        if not sel or sel.locked:
+            for btn in [self.editKeynoteBtn, self.dupKeynoteBtn,
+                        self.rekeyBtn, self.removeBtn,
+                        self.findBtn, self.placeBtn,
+                        self.indentBtn, self.outdentBtn,
+                        self.moveUpBtn, self.moveDownBtn]:
+                btn.IsEnabled = False
+            return
+
+        is_cat = sel.is_category  # top-level group (no parent_key)
+        is_kn = bool(sel.parent_key)
+
+        self.editKeynoteBtn.IsEnabled = True
+        self.dupKeynoteBtn.IsEnabled = is_kn
+        self.rekeyBtn.IsEnabled = True
+        self.removeBtn.IsEnabled = True
+        self.findBtn.IsEnabled = is_kn
+        self.placeBtn.IsEnabled = is_kn
+
+        # Hierarchy buttons
+        # Indent: can indent if it's a keynote and has a preceding sibling
+        can_indent = False
+        can_outdent = False
+        can_up = False
+        can_down = False
+
+        if is_kn:
+            siblings = _find_siblings(
+                self.all_keynotes, sel.parent_key)
+            idx = next(
+                (i for i, s in enumerate(siblings) if s.key == sel.key),
+                -1)
+            can_indent = idx > 0  # has a sibling above
+            # Can outdent if parent is a keynote (not a category)
+            cats = self.all_categories
+            cat_keys = set(c.key for c in cats)
+            parent_is_keynote = sel.parent_key not in cat_keys
+            can_outdent = parent_is_keynote
+            can_up = idx > 0
+            can_down = idx < len(siblings) - 1
+        elif is_cat:
+            cats = natsorted(self.all_categories, key=lambda x: x.key)
+            idx = next(
+                (i for i, c in enumerate(cats) if c.key == sel.key), -1)
+            can_up = idx > 0
+            can_down = idx < len(cats) - 1
+
+        self.indentBtn.IsEnabled = can_indent
+        self.outdentBtn.IsEnabled = can_outdent
+        self.moveUpBtn.IsEnabled = can_up
+        self.moveDownBtn.IsEnabled = can_down
+
+    # =========================================================================
+    # INDENT / OUTDENT — CORE HIERARCHY OPERATIONS
+    # =========================================================================
+
+    def indent_keynote(self, sender, args):
+        """Indent: make selected node a child of the sibling above it.
+        Effectively increases nesting depth by one level."""
+        sel = self.selected_keynote
+        if not sel or not sel.parent_key or sel.locked:
+            return
+
+        siblings = _find_siblings(self.all_keynotes, sel.parent_key)
+        idx = next(
+            (i for i, s in enumerate(siblings) if s.key == sel.key), -1)
+        if idx <= 0:
+            return
+
+        new_parent = siblings[idx - 1]
+        try:
+            kdb.move_keynote(self._conn, sel.key, new_parent.key)
+            self._needs_update = True
+        except System.TimeoutException as toutex:
+            forms.alert(toutex.Message); return
+        except Exception as ex:
+            forms.alert("Indent failed: %s" % ex); return
+
+        self._update_full_tree()
+        self._update_status_bar()
+
+    def outdent_keynote(self, sender, args):
+        """Outdent: promote selected node up one level.
+        Moves it to be a sibling of its current parent."""
+        sel = self.selected_keynote
+        if not sel or not sel.parent_key or sel.locked:
+            return
+
+        cats = self.all_categories
+        cat_keys = set(c.key for c in cats)
+
+        # Find current parent
+        current_parent_key = sel.parent_key
+        if current_parent_key in cat_keys:
+            # Parent is already a top-level category — can't outdent further
+            # (would need to become a category itself, which is a different op)
+            forms.alert(
+                "Already at the top keynote level.\n"
+                "To make this a top-level group, use the Re-Key as "
+                "category workflow.")
+            return
+
+        # Parent is a keynote — find grandparent
+        all_kn = self.all_keynotes
+        parent = next(
+            (k for k in all_kn if k.key == current_parent_key), None)
+        if not parent:
+            return
+
+        grandparent_key = parent.parent_key
+        if not grandparent_key:
+            return
+
+        try:
+            kdb.move_keynote(self._conn, sel.key, grandparent_key)
+            self._needs_update = True
+        except System.TimeoutException as toutex:
+            forms.alert(toutex.Message); return
+        except Exception as ex:
+            forms.alert("Outdent failed: %s" % ex); return
+
+        self._update_full_tree()
+        self._update_status_bar()
+
+    # =========================================================================
+    # MOVE UP / MOVE DOWN (swap keys with adjacent sibling)
+    # =========================================================================
+
+    def move_up(self, sender, args):
+        """Swap selected node's key with the sibling above it."""
+        self._swap_sibling(-1)
+
+    def move_down(self, sender, args):
+        """Swap selected node's key with the sibling below it."""
+        self._swap_sibling(1)
+
+    def _swap_sibling(self, direction):
+        """Swap keys between the selected node and its adjacent sibling.
+        direction: -1 for up, +1 for down."""
+        sel = self.selected_keynote
+        if not sel or sel.locked:
+            return
+
+        is_cat = sel.is_category
+        if is_cat:
+            siblings = natsorted(
+                self.all_categories, key=lambda x: x.key)
+        else:
+            siblings = _find_siblings(
+                self.all_keynotes, sel.parent_key)
+
+        idx = next(
+            (i for i, s in enumerate(siblings) if s.key == sel.key), -1)
+        target_idx = idx + direction
+        if target_idx < 0 or target_idx >= len(siblings):
+            return
+
+        other = siblings[target_idx]
+        if other.locked:
+            forms.alert("Adjacent item is locked."); return
+
+        # Swap keys
+        sel_key = sel.key
+        other_key = other.key
+        temp_key = "__swap_temp__"
+
+        try:
+            if is_cat:
+                kdb.update_category_key(self._conn, sel_key, temp_key)
+                kdb.update_category_key(self._conn, other_key, sel_key)
+                kdb.update_category_key(self._conn, temp_key, other_key)
+                # Update children parent_keys
+                with kdb.BulkAction(self._conn):
+                    for child in self.all_keynotes:
+                        if child.parent_key == sel_key:
+                            kdb.move_keynote(
+                                self._conn, child.key, other_key)
+                        elif child.parent_key == other_key:
+                            kdb.move_keynote(
+                                self._conn, child.key, sel_key)
+            else:
+                kdb.update_keynote_key(self._conn, sel_key, temp_key)
+                kdb.update_keynote_key(self._conn, other_key, sel_key)
+                kdb.update_keynote_key(self._conn, temp_key, other_key)
+                # Update children of swapped nodes
+                with kdb.BulkAction(self._conn):
+                    for child in self.all_keynotes:
+                        if child.parent_key == sel_key:
+                            kdb.move_keynote(
+                                self._conn, child.key, other_key)
+                        elif child.parent_key == other_key:
+                            kdb.move_keynote(
+                                self._conn, child.key, sel_key)
+
+            # Update references in Revit model
+            self._swap_keynote_refs(sel_key, other_key)
+            self._needs_update = True
+        except System.TimeoutException as toutex:
+            forms.alert(toutex.Message); return
+        except Exception as ex:
+            forms.alert("Swap failed: %s" % ex); return
+
+        self._update_full_tree()
+        self._update_status_bar()
+
+    def _swap_keynote_refs(self, key_a, key_b):
+        """Swap Revit element references between two keynote keys."""
+        temp = "__swap_ref__"
+        with revit.Transaction("Reorder Keynotes"):
+            for kid in self.get_used_keynote_elements().get(key_a, []):
+                kel = revit.doc.GetElement(kid)
+                if kel:
+                    p = kel.Parameter[DB.BuiltInParameter.KEY_VALUE]
+                    if p:
+                        p.Set(temp)
+            for kid in self.get_used_keynote_elements().get(key_b, []):
+                kel = revit.doc.GetElement(kid)
+                if kel:
+                    p = kel.Parameter[DB.BuiltInParameter.KEY_VALUE]
+                    if p:
+                        p.Set(key_a)
+            for kid in self.get_used_keynote_elements().get(key_a, []):
+                kel = revit.doc.GetElement(kid)
+                if kel:
+                    p = kel.Parameter[DB.BuiltInParameter.KEY_VALUE]
+                    if p and p.AsString() == temp:
+                        p.Set(key_b)
+
+    # =========================================================================
+    # KEY PICKER
+    # =========================================================================
+
+    def _pick_new_key(self):
+        try:
+            cats = kdb.get_categories(self._conn)
+            kns = kdb.get_keynotes(self._conn)
+            locks = kdb.get_locks(self._conn)
+        except System.TimeoutException as toutex:
+            forms.alert(toutex.Message); return
+        reserved = [x.key for x in cats]
+        reserved.extend([x.key for x in kns])
+        reserved.extend([x.LockTargetRecordKey for x in locks])
+        return forms.ask_for_unique_string(
+            prompt="Enter a unique key:",
+            title="Choose Unique Key",
+            reserved_values=reserved, owner=self)
+
+    def _pick_parent(self):
+        """Pick any node (category or keynote) as a parent."""
+        cats = self.all_categories
+        kns = self.all_keynotes
+        items = natsorted(
+            ["{} — {}".format(x.key, x.text) for x in cats] +
+            ["{} — {}".format(x.key, x.text) for x in kns],
+        )
+        chosen = forms.SelectFromList.show(
+            items, title="Select Parent", multiselect=False, owner=self)
+        if chosen:
+            return chosen.split(" — ")[0].strip()
+        return None
+
+    # =========================================================================
+    # SEARCH
+    # =========================================================================
+
+    def search_txt_changed(self, sender, args):
+        if self.search_tb.Text == '':
+            self.clrsearch_b.Visibility = Windows.Visibility.Collapsed
+        else:
+            self.clrsearch_b.Visibility = Windows.Visibility.Visible
+        self._update_full_tree(fast_filter=True)
+
+    def clear_search(self, sender, args):
+        self.search_tb.Text = ' '
+        self.search_tb.Clear()
+        self.search_tb.Focus()
+
+    def custom_filter(self, sender, args):
+        sfilter = forms.SelectFromList.show(
+            kdb.RKeynoteFilters.get_available_filters(),
+            title="Select Filter", owner=self)
+        if sfilter:
+            self.search_term = sfilter.format_term(self.search_term)
+
+    # =========================================================================
+    # SELECTION
+    # =========================================================================
+
+    def selected_keynote_changed(self, sender, args):
+        self._update_buttons()
+
+    # =========================================================================
+    # KEYBOARD SHORTCUTS
+    # =========================================================================
+
+    def window_keydown(self, sender, args):
+        key = args.Key
+        mods = Windows.Input.Keyboard.Modifiers
+        ctrl = Windows.Input.ModifierKeys.Control
+        shift = Windows.Input.ModifierKeys.Shift
+
+        if key == Windows.Input.Key.F5:
+            self.refresh(sender, args); args.Handled = True
+        elif key == Windows.Input.Key.F2:
+            if self.selected_keynote:
+                self.edit_keynote(sender, args); args.Handled = True
+        elif key == Windows.Input.Key.Delete:
+            if self.selected_keynote:
+                self.remove_keynote(sender, args); args.Handled = True
+        elif key == Windows.Input.Key.N and mods == ctrl:
+            self.add_keynote(sender, args); args.Handled = True
+        elif key == Windows.Input.Key.D and mods == ctrl:
+            if self.selected_keynote:
+                self.duplicate_keynote(sender, args); args.Handled = True
+        elif key == Windows.Input.Key.I and mods == ctrl:
+            self.import_keynotes(sender, args); args.Handled = True
+        elif key == Windows.Input.Key.Tab and mods == shift:
+            self.outdent_keynote(sender, args); args.Handled = True
+        elif key == Windows.Input.Key.Tab and mods == Windows.Input.ModifierKeys.None:
+            self.indent_keynote(sender, args); args.Handled = True
+        elif key == Windows.Input.Key.Up and mods == ctrl:
+            self.move_up(sender, args); args.Handled = True
+        elif key == Windows.Input.Key.Down and mods == ctrl:
+            self.move_down(sender, args); args.Handled = True
+        elif key == Windows.Input.Key.Escape:
+            if self.search_term:
+                self.clear_search(sender, args)
+            else:
+                self.Close()
+            args.Handled = True
+
+    # =========================================================================
+    # DRAG AND DROP
+    # =========================================================================
+
+    def tree_preview_mouse_down(self, sender, args):
+        self._drag_start_point = args.GetPosition(None)
+
+    def tree_preview_mouse_move(self, sender, args):
+        if self._drag_start_point is None:
+            return
+        if args.LeftButton != Windows.Input.MouseButtonState.Pressed:
+            self._drag_start_point = None; return
+
+        pt = args.GetPosition(None)
+        diff = self._drag_start_point - pt
+        if abs(diff.X) > System.Windows.SystemParameters.MinimumHorizontalDragDistance \
+                or abs(diff.Y) > System.Windows.SystemParameters.MinimumVerticalDragDistance:
+            sel = self.selected_keynote
+            if sel and not sel.locked:
+                self._is_dragging = True
+                try:
+                    data = Windows.DataObject("keynote", sel)
+                    Windows.DragDrop.DoDragDrop(
+                        self.keynotes_tv, data,
+                        Windows.DragDropEffects.Move)
+                except Exception as ex:
+                    logger.debug('Drag failed | %s' % ex)
+                finally:
+                    self._is_dragging = False
+                    self._drag_start_point = None
+
+    def tree_double_click(self, sender, args):
+        if not self._is_dragging and self.selected_keynote:
+            if self.selected_keynote.parent_key:
+                self.edit_keynote(sender, args)
+            else:
+                self.edit_category_inline(sender, args)
+
+    def tree_drag_over(self, sender, args):
+        args.Effects = Windows.DragDropEffects.None
+        if args.Data.GetDataPresent("keynote"):
+            args.Effects = Windows.DragDropEffects.Move
+
+    def tree_item_drag_over(self, sender, args):
+        args.Effects = Windows.DragDropEffects.None
+        if args.Data.GetDataPresent("keynote"):
+            args.Effects = Windows.DragDropEffects.Move
+            # Visual feedback
+            if hasattr(sender, 'Background'):
+                sender.Background = \
+                    Windows.Media.SolidColorBrush(
+                        Windows.Media.Color.FromArgb(40, 43, 87, 154))
+            args.Handled = True
+
+    def tree_item_drag_leave(self, sender, args):
+        if hasattr(sender, 'Background'):
+            sender.Background = None
+
+    def tree_drop(self, sender, args):
+        pass
+
+    def tree_item_drop(self, sender, args):
+        """Drop handler — reparent the dragged node under the target."""
+        if hasattr(sender, 'Background'):
+            sender.Background = None
+
+        if not args.Data.GetDataPresent("keynote"):
+            return
+        dragged = args.Data.GetData("keynote")
+        if not dragged:
+            return
+
+        target = getattr(sender, 'DataContext', None)
+        if target is None or target == dragged:
+            return
+
+        # Determine new parent key
+        new_parent_key = target.key
+
+        # Don't allow dropping onto self or own children
+        if new_parent_key == dragged.key:
+            return
+
+        # Check for circular reference
+        def _is_descendant(parent_key, child_key, all_kn):
+            """Check if child_key is a descendant of parent_key."""
+            visited = set()
+            stack = [child_key]
+            while stack:
+                current = stack.pop()
+                if current in visited:
+                    continue
+                visited.add(current)
+                for kn in all_kn:
+                    if kn.parent_key == current:
+                        if kn.key == parent_key:
+                            return True
+                        stack.append(kn.key)
+            return False
+
+        if dragged.parent_key and _is_descendant(
+                new_parent_key, dragged.key, self.all_keynotes):
+            forms.alert("Cannot drop a parent onto its own descendant.")
+            return
+
+        # If dragged is a category, this is more complex — skip for now
+        if dragged.is_category:
+            forms.alert(
+                "Drag top-level groups is not supported.\n"
+                "Use Move Up / Move Down to reorder groups.")
+            return
+
+        if new_parent_key == dragged.parent_key:
+            return  # no change
+
+        try:
+            kdb.move_keynote(self._conn, dragged.key, new_parent_key)
+            self._needs_update = True
+        except System.TimeoutException as toutex:
+            forms.alert(toutex.Message)
+        except Exception as ex:
+            forms.alert("Move failed: %s" % ex)
+
+        self._update_full_tree()
+        self._update_status_bar()
+        args.Handled = True
+
+    # =========================================================================
+    # REFRESH
+    # =========================================================================
+
+    def refresh(self, sender, args):
+        if self._conn:
+            self._used_keysdict = self.get_used_keynote_elements()
+            self._update_full_tree()
+            self._update_status_bar()
+        self.search_tb.Focus()
+
+    # =========================================================================
+    # CATEGORY (GROUP) OPERATIONS
+    # =========================================================================
+
+    def add_category(self, sender, args):
+        try:
+            new_cat = EditRecordWindow(
+                self, self._conn, kdb.EDIT_MODE_ADD_CATEG).show()
+            if new_cat:
+                self._needs_update = True
+        except Exception as ex:
+            forms.alert(str(ex))
+        finally:
+            self._update_full_tree()
+            self._update_status_bar()
+
+    def edit_category_inline(self, sender, args):
+        """Edit a category (top-level group) via the edit dialog."""
+        sel = self.selected_keynote
+        if sel and sel.is_category and not sel.locked:
+            try:
+                EditRecordWindow(
+                    self, self._conn,
+                    kdb.EDIT_MODE_EDIT_CATEG,
+                    rkeynote=sel).show()
+                self._needs_update = True
+            except Exception as ex:
+                forms.alert(str(ex))
+            finally:
+                self._update_full_tree()
+                self._update_status_bar()
+
+    # =========================================================================
+    # KEYNOTE CRUD
+    # =========================================================================
+
+    def add_keynote(self, sender, args):
+        parent_key = None
+        sel = self.selected_keynote
+        if sel:
+            parent_key = sel.key if sel.is_category else sel.parent_key
+        if not parent_key:
+            parent_key = self._pick_parent()
+        if parent_key:
+            try:
+                EditRecordWindow(
+                    self, self._conn,
+                    kdb.EDIT_MODE_ADD_KEYNOTE,
+                    pkey=parent_key).show()
+                self._needs_update = True
+            except Exception as ex:
+                forms.alert(str(ex))
+            finally:
+                self._update_full_tree()
+                self._update_status_bar()
+
+    def duplicate_keynote(self, sender, args):
+        sel = self.selected_keynote
+        if sel and sel.parent_key:
+            try:
+                EditRecordWindow(
+                    self, self._conn,
+                    kdb.EDIT_MODE_ADD_KEYNOTE,
+                    text=sel.text, pkey=sel.parent_key).show()
+                self._needs_update = True
+            except Exception as ex:
+                forms.alert(str(ex))
+            finally:
+                self._update_full_tree()
+                self._update_status_bar()
+
+    def edit_keynote(self, sender, args):
+        sel = self.selected_keynote
+        if not sel:
+            return
+        if sel.is_category:
+            self.edit_category_inline(sender, args)
+            return
+        try:
+            EditRecordWindow(
+                self, self._conn,
+                kdb.EDIT_MODE_EDIT_KEYNOTE,
+                rkeynote=sel).show()
+            self._needs_update = True
+        except Exception as ex:
+            forms.alert(str(ex))
+        finally:
+            self._update_full_tree()
+
+    def remove_keynote(self, sender, args):
+        sel = self.selected_keynote
+        if not sel:
+            return
+
+        if sel.is_category:
+            # Removing a category
+            if sel.has_children():
+                forms.alert(
+                    "Group '%s' has children. Remove them first."
+                    % sel.key)
+                return
+            if sel.used:
+                forms.alert("Group '%s' is in use." % sel.key)
+                return
+            if forms.alert("Delete group '%s'?" % sel.key,
+                           yes=True, no=True):
+                try:
+                    kdb.remove_category(self._conn, sel.key)
+                    self._needs_update = True
+                except Exception as ex:
+                    forms.alert(str(ex))
+        else:
+            # Removing a keynote
+            if sel.children:
+                forms.alert(
+                    "Keynote '%s' has children. Remove them first."
+                    % sel.key)
+                return
+            if sel.used:
+                forms.alert("Keynote '%s' is in use." % sel.key)
+                return
+            if forms.alert("Delete keynote '%s'?" % sel.key,
+                           yes=True, no=True):
+                try:
+                    kdb.remove_keynote(self._conn, sel.key)
+                    self._needs_update = True
+                except Exception as ex:
+                    forms.alert(str(ex))
+
+        self._update_full_tree()
+        self._update_status_bar()
+
+    def rekey_keynote(self, sender, args):
+        sel = self.selected_keynote
+        if not sel:
+            return
+        if any(x.locked for x in sel.children):
+            forms.alert("Some children are locked — cannot re-key.")
+            return
+        try:
+            from_key = sel.key
+            to_key = self._pick_new_key()
+            if to_key and to_key != from_key:
+                if sel.is_category:
+                    kdb.update_category_key(
+                        self._conn, from_key, to_key)
+                    with kdb.BulkAction(self._conn):
+                        for child in self.all_keynotes:
+                            if child.parent_key == from_key:
+                                kdb.move_keynote(
+                                    self._conn, child.key, to_key)
+                else:
+                    kdb.update_keynote_key(
+                        self._conn, from_key, to_key)
+                    with kdb.BulkAction(self._conn):
+                        for child in self.all_keynotes:
+                            if child.parent_key == from_key:
+                                kdb.move_keynote(
+                                    self._conn, child.key, to_key)
+                # Update Revit element refs
+                self._rekey_refs(from_key, to_key)
+                self._needs_update = True
+        except Exception as ex:
+            forms.alert(str(ex))
+
+        self._update_full_tree()
+        self._update_status_bar()
+
+    def _rekey_refs(self, from_key, to_key):
+        with revit.Transaction("Re-Key {}".format(from_key)):
+            for kid in self.get_used_keynote_elements().get(from_key, []):
+                kel = revit.doc.GetElement(kid)
+                if kel:
+                    p = kel.Parameter[DB.BuiltInParameter.KEY_VALUE]
+                    if p:
+                        p.Set(to_key)
+
+    def show_keynote(self, sender, args):
+        sel = self.selected_keynote
+        if sel:
+            self.Close()
+            kids = self.get_used_keynote_elements().get(sel.key, [])
+            for kid in kids:
+                source = viewname = ''
+                kel = revit.doc.GetElement(kid)
+                ehist = revit.query.get_history(kel)
+                if kel:
+                    source = kel.Parameter[
+                        DB.BuiltInParameter.KEY_SOURCE_PARAM].AsString()
+                    vel = revit.doc.GetElement(kel.OwnerViewId)
+                    if vel:
+                        viewname = revit.query.get_name(vel)
+                report = "Keynote: {} | Source: {} | View: {}".format(
+                    output.linkify(kid), source, viewname)
+                if ehist:
+                    report += " | Last edit: %s" % ehist.last_changed_by
+                print(report)
+
+    def place_keynote(self, sender, args):
+        self.Close()
+        keynotes_cat = \
+            revit.query.get_category(DB.BuiltInCategory.OST_KeynoteTags)
+        sel = self.selected_keynote
+        if keynotes_cat and sel:
+            def_id = revit.doc.GetDefaultFamilyTypeId(keynotes_cat.Id)
+            if revit.doc.GetElement(def_id):
+                try:
+                    DocumentEventUtils \
+                        .PostCommandAndUpdateNewElementProperties(
+                            HOST_APP.uiapp, revit.doc,
+                            self.postable_keynote_command,
+                            "Update Keynotes",
+                            DB.BuiltInParameter.KEY_VALUE, sel.key)
+                except Exception as ex:
+                    forms.alert(str(ex))
+
+    # =========================================================================
+    # FILE OPERATIONS
+    # =========================================================================
+
+    def change_keynote_file(self, sender, args):
+        self._change_kfile()
+        self._determine_kfile()
+        self._connect_kfile()
+        self._needs_update = True
+        self._update_full_tree()
+        self._update_status_bar()
+        self.Close()
+
+    def show_keynote_file(self, sender, args):
+        coreutils.show_entry_in_explorer(self._kfile)
+
+    def import_keynotes(self, sender, args):
+        kfile = forms.pick_file('txt')
+        if kfile:
+            res = forms.alert("Skip duplicate entries?",
+                              yes=True, no=True)
+            try:
+                kdb.import_legacy_keynotes(
+                    self._conn, kfile, skip_dup=res)
+            except Exception as ex:
+                forms.alert("Import failed: %s" % ex)
+            finally:
+                self._update_full_tree()
+                self._update_status_bar()
+
+    def export_keynotes(self, sender, args):
+        kfile = forms.save_file('txt')
+        if kfile:
+            try:
+                kdb.export_legacy_keynotes(self._conn, kfile)
+            except Exception as ex:
+                forms.alert(str(ex))
+
+    def export_visible_keynotes(self, sender, args):
+        kfile = forms.save_file('txt')
+        if kfile:
+            include = set()
+            for rk in (self.current_keynotes or []):
+                include.update(rk.collect_keys())
+            try:
+                kdb.export_legacy_keynotes(
+                    self._conn, kfile, include_keys=include)
+            except Exception as ex:
+                forms.alert(str(ex))
+
+    # =========================================================================
+    # CLOSE
+    # =========================================================================
+
+    def update_model(self, sender, args):
+        self.Close()
+
+    def window_closing(self, sender, args):
+        if self._kfile_handler == 'adc':
+            try:
+                adc.unlock_file(self._kfile_ext)
+            except Exception:
+                pass
+        if self._needs_update:
+            with revit.Transaction("Update Keynotes"):
+                revit.update.update_linked_keynotes(doc=revit.doc)
+        try:
+            self.save_config()
+        except Exception as ex:
+            logger.debug('Save config failed | %s' % ex)
+        if self._conn:
+            try:
+                self._conn.Dispose()
+            except Exception:
+                pass
+
+
+# =============================================================================
+# ENTRY POINT
+# =============================================================================
+
+try:
+    KeynoteManagerWindow(
+        xaml_file_name='KeynoteManagerWindow.xaml',
+        reset_config=__shiftclick__  #pylint: disable=undefined-variable
+    ).show(modal=True)
+except Exception as kmex:
+    forms.alert(str(kmex), expanded="Creating keynote manager window")
