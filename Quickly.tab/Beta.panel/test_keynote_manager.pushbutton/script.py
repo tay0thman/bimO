@@ -19,7 +19,7 @@ import os.path as op
 import shutil
 import math
 from collections import defaultdict, OrderedDict
-from natsort import natsorted
+from natsort import natsorted #type: ignore
 
 from pyrevit import HOST_APP
 from pyrevit import framework
@@ -71,7 +71,7 @@ def _find_parent_of(all_categories, all_keynotes, child):
 
 
 # =============================================================================
-# EDIT RECORD WINDOW (unchanged from pyRevit — works with EditRecord.xaml)
+# EDIT RECORD WINDOW 
 # =============================================================================
 
 class EditRecordWindow(forms.WPFWindow):
@@ -715,7 +715,8 @@ class KeynoteManagerWindow(forms.WPFWindow):
                         self.rekeyBtn, self.removeBtn,
                         self.findBtn, self.placeBtn,
                         self.indentBtn, self.outdentBtn,
-                        self.moveUpBtn, self.moveDownBtn]:
+                        self.moveUpBtn, self.moveDownBtn,
+                        self.caseBtn]:
                 btn.IsEnabled = False
             return
 
@@ -728,6 +729,7 @@ class KeynoteManagerWindow(forms.WPFWindow):
         self.removeBtn.IsEnabled = True
         self.findBtn.IsEnabled = is_kn
         self.placeBtn.IsEnabled = is_kn
+        self.caseBtn.IsEnabled = True
 
         # Hierarchy buttons
         # Indent: can indent if it's a keynote and has a preceding sibling
@@ -1355,6 +1357,51 @@ class KeynoteManagerWindow(forms.WPFWindow):
                     p = kel.Parameter[DB.BuiltInParameter.KEY_VALUE]
                     if p:
                         p.Set(to_key)
+
+    # =========================================================================
+    # TEXT CAPITALIZATION (quick apply without opening edit dialog)
+    # =========================================================================
+
+    def show_case_menu(self, sender, args):
+        """Open the capitalization context menu on the button."""
+        self.caseMenu.PlacementTarget = sender
+        self.caseMenu.IsOpen = True
+
+    def _apply_case(self, transform_fn):
+        """Apply a text transformation to the selected keynote/category."""
+        sel = self.selected_keynote
+        if not sel or sel.locked:
+            return
+        new_text = transform_fn(sel.text)
+        if new_text == sel.text:
+            return
+        try:
+            if sel.is_category:
+                kdb.update_category_title(self._conn, sel.key, new_text)
+            else:
+                kdb.update_keynote_text(self._conn, sel.key, new_text)
+            self._needs_update = True
+        except System.TimeoutException as toutex:
+            forms.alert(toutex.Message); return
+        except Exception as ex:
+            forms.alert("Case change failed: %s" % ex); return
+        self._update_full_tree()
+
+    def to_upper(self, sender, args):
+        self._apply_case(lambda t: t.upper())
+
+    def to_lower(self, sender, args):
+        self._apply_case(lambda t: t.lower())
+
+    def to_title(self, sender, args):
+        self._apply_case(lambda t: t.title())
+
+    def to_sentence(self, sender, args):
+        self._apply_case(lambda t: t[:1].upper() + t[1:].lower() if t else t)
+
+    # =========================================================================
+    # FIND / PLACE
+    # =========================================================================
 
     def show_keynote(self, sender, args):
         sel = self.selected_keynote

@@ -420,6 +420,24 @@
 
                         <Rectangle Style="{StaticResource ToolbarSep}"/>
 
+                        <!-- Capitalization -->
+                        <Button x:Name="caseBtn" Style="{StaticResource ToolbarButton}"
+                                Width="36" ToolTip="Change text capitalization"
+                                IsEnabled="False" Click="show_case_menu">
+                            <TextBlock Text="Aa" FontSize="12" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextSecondaryBrush}"/>
+                            <Button.ContextMenu>
+                                <ContextMenu x:Name="caseMenu">
+                                    <MenuItem Header="UPPER CASE"   Click="to_upper"    InputGestureText="TT"/>
+                                    <MenuItem Header="lower case"   Click="to_lower"    InputGestureText="tt"/>
+                                    <MenuItem Header="Title Case"   Click="to_title"    InputGestureText="Tt"/>
+                                    <MenuItem Header="Sentence case" Click="to_sentence" InputGestureText="Se"/>
+                                </ContextMenu>
+                            </Button.ContextMenu>
+                        </Button>
+
+                        <Rectangle Style="{StaticResource ToolbarSep}"/>
+
                         <!-- Delete -->
                         <Button x:Name="removeBtn" Style="{StaticResource ToolbarButton}"
                                 Content="&#x2715;" FontSize="12"
