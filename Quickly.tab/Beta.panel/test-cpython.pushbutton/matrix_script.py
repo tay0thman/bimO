@@ -4,24 +4,24 @@ import os
 import random
 import ctypes
 
-# --- PATCH: FIX SYS.PATH FOR COMPILED LOADER ---
-try:
-    import pyrevit
-except ImportError:
-    # 1. Find the path that contains the CPython Engine
-    engine_path = next((p for p in sys.path if "pyRevit-Master" in p and "cengines" in p), None)
+# # --- PATCH: FIX SYS.PATH FOR COMPILED LOADER ---
+# try:
+#     import pyrevit
+# except ImportError:
+#     # 1. Find the path that contains the CPython Engine
+#     engine_path = next((p for p in sys.path if "pyRevit-Master" in p and "cengines" in p), None)
     
-    if engine_path:
-        # 2. Derive the root 'pyrevitlib' folder
-        root_path = engine_path.split(r"\bin")[0]
-        lib_path = os.path.join(root_path, "pyrevitlib")
-        site_path = os.path.join(root_path, "site-packages")
+#     if engine_path:
+#         # 2. Derive the root 'pyrevitlib' folder
+#         root_path = engine_path.split(r"\bin")[0]
+#         lib_path = os.path.join(root_path, "pyrevitlib")
+#         site_path = os.path.join(root_path, "site-packages")
 
-        # 3. Inject into sys.path
-        if os.path.exists(lib_path) and lib_path not in sys.path:
-            sys.path.append(lib_path)
-        if os.path.exists(site_path) and site_path not in sys.path:
-            sys.path.append(site_path)
+#         # 3. Inject into sys.path
+#         if os.path.exists(lib_path) and lib_path not in sys.path:
+#             sys.path.append(lib_path)
+#         if os.path.exists(site_path) and site_path not in sys.path:
+#             sys.path.append(site_path)
 
 # Now we can safely import
 try:
@@ -137,7 +137,7 @@ if is_cpython:
         render_matrix_rain()
         output.print_html("<br><div style='color:#fff; background-color:green; padding:5px; text-align:center'>LOADER TEST PASSED</div>")
     else:
-        print("LOADER TEST PASSED (HTML Output Not Supported)")
+        print("LOADER TEST PASSED!!! (HTML Output Not Supported)")
 else:
     if hasattr(output, 'print_html'):
         output.print_html("<br><div style='color:#fff; background-color:red; padding:5px; text-align:center'>LOADER TEST FAILED (Running IronPython)</div>")
