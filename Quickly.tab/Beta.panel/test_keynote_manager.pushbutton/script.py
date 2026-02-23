@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+#-*- coding: utf-8 -*-
 """Manage project keynotes — unified tree with hierarchy controls.
 
 Features:
@@ -19,7 +19,7 @@ import os.path as op
 import shutil
 import math
 from collections import defaultdict, OrderedDict
-from natsort import natsorted #type: ignore
+from natsort import natsorted
 
 from pyrevit import HOST_APP
 from pyrevit import framework
@@ -37,6 +37,90 @@ import keynotesdb as kdb
 
 logger = script.get_logger()
 output = script.get_output()
+
+
+# =============================================================================
+# ADC MONKEY-PATCH — fix ReadOnlyList subscripting on .NET Framework
+# =============================================================================
+# pyRevit's adc.py uses [0] on .NET ReadOnlyList objects returned by the
+# Desktop Connector API.  This works on .NET 8 (Revit 2025+) but fails on
+# .NET Framework 4.x (Revit 2023/2024) because IronPython can't subscript
+# ReadOnlyList[T] with [].  The fix: iterate or use .Item[0] / LINQ First().
+
+def _safe_first(collection):
+    """Safely get first element from a .NET collection that may not
+    support Python [] subscripting (ReadOnlyList, IList, etc.)."""
+    if collection is None:
+        return None
+    # Try normal indexing first (.NET 8 / CPython)
+    try:
+        return collection[0]
+    except TypeError:
+        pass
+    # Try .Item[] indexer (.NET Framework generic collections)
+    try:
+        return collection.Item[0]
+    except (TypeError, AttributeError):
+        pass
+    # Fall back to iteration
+    try:
+        for item in collection:
+            return item
+    except TypeError:
+        pass
+    return None
+
+
+def _patched_get_item(adc_svc, path):
+    """Patched version of adc._get_item that handles ReadOnlyList."""
+    import os.path as _op
+    path = adc._ensure_local_path(adc_svc, path)
+    if not _op.isfile(path):
+        raise Exception("Path does not point to a file")
+    res = adc_svc.GetItemsByWorkspacePaths([path])
+    if not res:
+        raise Exception("Cannot find item in any ADC drive")
+    first = _safe_first(res)
+    if first is None:
+        raise Exception("ADC returned empty result for path")
+    return first.Item
+
+
+def _patched_get_item_lockstatus(adc_svc, item):
+    """Patched version of adc._get_item_lockstatus."""
+    res = adc_svc.GetLockStatus([item.Id])
+    if res and res.Status:
+        return _safe_first(res.Status)
+    return None
+
+
+def _patched_get_item_property_value(adc_svc, drive, item, prop_name):
+    """Patched version of adc._get_item_property_value."""
+    for prop_def in adc._get_drive_properties(adc_svc, drive):
+        if prop_def.DisplayName == prop_name:
+            res = adc_svc.GetProperties([item.Id], [prop_def.Id])
+            if res:
+                return _safe_first(res.Values)
+    return None
+
+
+def _patched_get_item_property_id_value(adc_svc, drive, item, prop_id):
+    """Patched version of adc._get_item_property_id_value."""
+    for prop_def in adc._get_drive_properties(adc_svc, drive):
+        if prop_def.Id == prop_id:
+            res = adc_svc.GetProperties([item.Id], [prop_def.Id])
+            if res:
+                return _safe_first(res.Values)
+    return None
+
+
+# Apply patches (only on .NET Framework where the bug manifests)
+if not HOST_APP.is_newer_than("2024"):
+    logger.debug('Applying ADC ReadOnlyList patches for .NET Framework')
+    adc._get_item = _patched_get_item
+    adc._get_item_lockstatus = _patched_get_item_lockstatus
+    adc._get_item_property_value = _patched_get_item_property_value
+    adc._get_item_property_id_value = _patched_get_item_property_id_value
 
 
 # =============================================================================
@@ -71,7 +155,7 @@ def _find_parent_of(all_categories, all_keynotes, child):
 
 
 # =============================================================================
-# EDIT RECORD WINDOW 
+# EDIT RECORD WINDOW (unchanged from pyRevit — works with EditRecord.xaml)
 # =============================================================================
 
 class EditRecordWindow(forms.WPFWindow):
@@ -419,7 +503,7 @@ class KeynoteManagerWindow(forms.WPFWindow):
     def _update_status_bar(self):
         if self._kfile:
             fname = op.basename(self._kfile)
-            handler = ' (BIM 360)' if self._kfile_handler == 'adc' else ''
+            handler = ' (ACC / Forma)' if self._kfile_handler == 'adc' else ''
             self.statusLeft.Text = u"{}{} \u2014 {}".format(
                 fname, handler, op.dirname(self._kfile))
         else:
@@ -531,7 +615,7 @@ class KeynoteManagerWindow(forms.WPFWindow):
                         except Exception as syncex:
                             logger.debug('ADC sync/lock | %s' % syncex)
                         self._kfile = local_kfile
-                        self.Title += ' (BIM 360)'
+                        self.Title += ' (ACC / Forma)'
                     else:
                         forms.alert(
                             "Cannot resolve local path via {}."
