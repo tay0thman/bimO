@@ -1,0 +1,12 @@
+tooltip:
+
+  en_us: Measure the area of selected elements in the active view. Provides an output summary and a list of the measured elements.
+
+title:
+
+  en_us: >-
+    Quick Area
+authors:
+  - 'Tay Othman'
+
+min_revit_version: 2020

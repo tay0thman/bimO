@@ -1,0 +1,12 @@
+tooltip:
+
+  en_us: Measure the length of a selected element, or the distance between two points, in the active view. Provides an output summary and a list of the measured elements.
+
+title:
+
+  en_us: >-
+    Quick Length
+authors:
+  - 'Tay Othman'
+
+min_revit_version: 2020

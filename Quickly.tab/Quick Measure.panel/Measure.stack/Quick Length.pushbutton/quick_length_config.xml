@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<QuickLengthConfig>
+    <Projects>
+        <Project guid="default">
+            <SelectedUnit>Fractional Feet and Inches</SelectedUnit>
+            <PrecisionIndex>4</PrecisionIndex>
+        </Project>
+    <Project guid="7cacd49c-ac17-4591-ad0a-cbc9bb40015a-00012b83"><SelectedUnit>Decimal Feet</SelectedUnit><PrecisionIndex>4</PrecisionIndex></Project></Projects>
+</QuickLengthConfig>
