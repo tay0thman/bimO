@@ -1,4 +1,4 @@
-#-*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Manage project keynotes — unified tree with hierarchy controls.
 
 Features:
@@ -23,17 +23,24 @@ from natsort import natsorted
 
 from pyrevit import HOST_APP
 from pyrevit import framework
-from pyrevit.framework import System, Windows
 from pyrevit import coreutils
 from pyrevit import revit, DB, UI
 from pyrevit import forms
 from pyrevit import script
+
+from pyrevit.framework import System, Windows
+from System.Windows.Interop import WindowInteropHelper
+from System.Diagnostics import Process as SysProcess
+from System.Windows.Threading import DispatcherTimer
+from System import TimeSpan
 
 from pyrevit.runtime.types import DocumentEventUtils
 
 from pyrevit.interop import adc
 
 import keynotesdb as kdb
+
+__persistentengine__ = True
 
 logger = script.get_logger()
 output = script.get_output()
@@ -121,6 +128,59 @@ if not HOST_APP.is_newer_than("2024"):
     adc._get_item_lockstatus = _patched_get_item_lockstatus
     adc._get_item_property_value = _patched_get_item_property_value
     adc._get_item_property_id_value = _patched_get_item_property_id_value
+
+
+# =============================================================================
+# EXTERNAL EVENT HANDLER (for modeless window Revit API access)
+# =============================================================================
+# Modeless WPF windows cannot start Revit transactions directly.
+# All write operations (transactions, PostCommand) are queued here and
+# executed on Revit's main thread via ExternalEvent.
+
+class RevitActionHandler(UI.IExternalEventHandler):
+    """Queues callables and runs them inside Revit's valid API context."""
+
+    def __init__(self):
+        self._queue = []
+
+    def queue(self, action, callback=None, window=None):
+        """Add an action (and optional WPF-thread callback) to the queue."""
+        self._queue.append((action, callback, window))
+
+    def Execute(self, app):
+        """Called by Revit on the main thread when the event fires."""
+        while self._queue:
+            action, callback, window = self._queue.pop(0)
+            try:
+                action()
+            except Exception as ex:
+                logger.error('RevitActionHandler | %s' % ex)
+                try:
+                    if window and window.IsLoaded:
+                        window.Dispatcher.Invoke(
+                            System.Action(
+                                lambda e=str(ex): forms.alert(e)))
+                except Exception:
+                    pass
+            if callback:
+                try:
+                    if window and window.IsLoaded:
+                        window.Dispatcher.Invoke(System.Action(callback))
+                    else:
+                        callback()
+                except Exception as cbex:
+                    logger.debug('Callback failed | %s' % cbex)
+
+    def GetName(self):
+        return "KeynoteManagerHandler"
+
+
+# Module-level handler + event (persist across window open/close)
+_ext_handler = RevitActionHandler()
+_ext_event = UI.ExternalEvent.Create(_ext_handler)
+
+# Singleton — only one keynote manager window at a time
+_active_window = None
 
 
 # =============================================================================
@@ -408,6 +468,15 @@ class KeynoteManagerWindow(forms.WPFWindow):
     def __init__(self, xaml_file_name, reset_config=False):
         forms.WPFWindow.__init__(self, xaml_file_name)
 
+        # Set Revit as the owner window — critical for modeless stability.
+        # Without this, WPF's message pump collides with Revit's on focus
+        # change, causing hard crashes.
+        try:
+            wih = WindowInteropHelper(self)
+            wih.Owner = SysProcess.GetCurrentProcess().MainWindowHandle
+        except Exception as ex:
+            logger.debug('WindowInteropHelper failed | %s' % ex)
+
         self._kfile = None
         self._kfile_handler = None
         self._kfile_ext = None
@@ -424,6 +493,13 @@ class KeynoteManagerWindow(forms.WPFWindow):
         # drag state
         self._drag_start_point = None
         self._is_dragging = False
+
+        # modeless close state
+        self._close_pending = False
+
+        self._search_timer = DispatcherTimer()
+        self._search_timer.Interval = TimeSpan.FromMilliseconds(300) # Wait 300ms after last keystroke
+        self._search_timer.Tick += self._on_search_timer_tick
 
         self.load_config(reset_config)
         self._update_full_tree()
@@ -503,7 +579,7 @@ class KeynoteManagerWindow(forms.WPFWindow):
     def _update_status_bar(self):
         if self._kfile:
             fname = op.basename(self._kfile)
-            handler = ' (ACC / Forma)' if self._kfile_handler == 'adc' else ''
+            handler = ' ( ACC / FORMA )' if self._kfile_handler == 'adc' else ''
             self.statusLeft.Text = u"{}{} \u2014 {}".format(
                 fname, handler, op.dirname(self._kfile))
         else:
@@ -518,6 +594,16 @@ class KeynoteManagerWindow(forms.WPFWindow):
                     len(cats), len(knotes), used)
         except Exception:
             self.statusRight.Text = ""
+
+    # =========================================================================
+    # REVIT THREAD DISPATCH (for modeless window)
+    # =========================================================================
+
+    def _revit_run(self, action, callback=None):
+        """Queue an action to execute on Revit's main thread.
+        Optional callback runs on the WPF thread after the action."""
+        _ext_handler.queue(action, callback, self)
+        _ext_event.Raise()
 
     # =========================================================================
     # USED KEYNOTE TRACKING
@@ -615,7 +701,7 @@ class KeynoteManagerWindow(forms.WPFWindow):
                         except Exception as syncex:
                             logger.debug('ADC sync/lock | %s' % syncex)
                         self._kfile = local_kfile
-                        self.Title += ' (ACC / Forma)'
+                        self.Title += ' ( ACC / FORMA )'
                     else:
                         forms.alert(
                             "Cannot resolve local path via {}."
@@ -990,8 +1076,9 @@ class KeynoteManagerWindow(forms.WPFWindow):
                             kdb.move_keynote(
                                 self._conn, child.key, sel_key)
 
-            # Update references in Revit model
-            self._swap_keynote_refs(sel_key, other_key)
+            # Update references in Revit model (async via ExternalEvent)
+            sk, ok = sel_key, other_key
+            self._revit_run(lambda: self._swap_keynote_refs(sk, ok))
             self._needs_update = True
         except System.TimeoutException as toutex:
             forms.alert(toutex.Message); return
@@ -1066,12 +1153,23 @@ class KeynoteManagerWindow(forms.WPFWindow):
             self.clrsearch_b.Visibility = Windows.Visibility.Collapsed
         else:
             self.clrsearch_b.Visibility = Windows.Visibility.Visible
+            
+        # Stop and restart the timer on every keystroke. 
+        # The filter won't run until the typing pauses for 300ms.
+        if hasattr(self, '_search_timer'):
+            self._search_timer.Stop()
+            self._search_timer.Start()
+
+    def _on_search_timer_tick(self, sender, args):
+        """Fires when the user stops typing."""
+        self._search_timer.Stop()
         self._update_full_tree(fast_filter=True)
 
     def clear_search(self, sender, args):
-        self.search_tb.Text = ' '
+        self.search_tb.Text = '' # Removed the space to ensure clean empty string
         self.search_tb.Clear()
         self.search_tb.Focus()
+        self._update_full_tree(fast_filter=True)
 
     def custom_filter(self, sender, args):
         sfilter = forms.SelectFromList.show(
@@ -1132,7 +1230,7 @@ class KeynoteManagerWindow(forms.WPFWindow):
     # =========================================================================
 
     def tree_preview_mouse_down(self, sender, args):
-        self._drag_start_point = args.GetPosition(None)
+        self._drag_start_point = args.GetPosition(sender)
 
     def tree_preview_mouse_move(self, sender, args):
         if self._drag_start_point is None:
@@ -1140,7 +1238,7 @@ class KeynoteManagerWindow(forms.WPFWindow):
         if args.LeftButton != Windows.Input.MouseButtonState.Pressed:
             self._drag_start_point = None; return
 
-        pt = args.GetPosition(None)
+        pt = args.GetPosition(sender)
         diff = self._drag_start_point - pt
         if abs(diff.X) > System.Windows.SystemParameters.MinimumHorizontalDragDistance \
                 or abs(diff.Y) > System.Windows.SystemParameters.MinimumVerticalDragDistance:
@@ -1260,10 +1358,15 @@ class KeynoteManagerWindow(forms.WPFWindow):
 
     def refresh(self, sender, args):
         if self._conn:
-            self._used_keysdict = self.get_used_keynote_elements()
-            self._update_full_tree()
-            self._update_status_bar()
-        self.search_tb.Focus()
+            def _query_used():
+                self._used_keysdict = self.get_used_keynote_elements()
+            def _on_done():
+                self._update_full_tree()
+                self._update_status_bar()
+                self.search_tb.Focus()
+            self._revit_run(_query_used, callback=_on_done)
+        else:
+            self.search_tb.Focus()
 
     # =========================================================================
     # CATEGORY (GROUP) OPERATIONS
@@ -1424,8 +1527,9 @@ class KeynoteManagerWindow(forms.WPFWindow):
                             if child.parent_key == from_key:
                                 kdb.move_keynote(
                                     self._conn, child.key, to_key)
-                # Update Revit element refs
-                self._rekey_refs(from_key, to_key)
+                # Update Revit element refs (async via ExternalEvent)
+                fk, tk = from_key, to_key
+                self._revit_run(lambda: self._rekey_refs(fk, tk))
                 self._needs_update = True
         except Exception as ex:
             forms.alert(str(ex))
@@ -1489,9 +1593,13 @@ class KeynoteManagerWindow(forms.WPFWindow):
 
     def show_keynote(self, sender, args):
         sel = self.selected_keynote
-        if sel:
-            self.Close()
-            kids = self.get_used_keynote_elements().get(sel.key, [])
+        if not sel:
+            return
+        key = sel.key
+        used_snapshot = dict(self._used_keysdict)
+        self.Close()
+        def _do():
+            kids = used_snapshot.get(key, [])
             for kid in kids:
                 source = viewname = ''
                 kel = revit.doc.GetElement(kid)
@@ -1507,37 +1615,51 @@ class KeynoteManagerWindow(forms.WPFWindow):
                 if ehist:
                     report += " | Last edit: %s" % ehist.last_changed_by
                 print(report)
+        self._revit_run(_do)
 
     def place_keynote(self, sender, args):
-        self.Close()
-        keynotes_cat = \
-            revit.query.get_category(DB.BuiltInCategory.OST_KeynoteTags)
         sel = self.selected_keynote
-        if keynotes_cat and sel:
-            def_id = revit.doc.GetDefaultFamilyTypeId(keynotes_cat.Id)
-            if revit.doc.GetElement(def_id):
-                try:
+        if not sel:
+            return
+        sel_key = sel.key
+        postcmd = self.postable_keynote_command
+        self.Close()
+        def _do():
+            keynotes_cat = \
+                revit.query.get_category(DB.BuiltInCategory.OST_KeynoteTags)
+            if keynotes_cat:
+                def_id = revit.doc.GetDefaultFamilyTypeId(keynotes_cat.Id)
+                if revit.doc.GetElement(def_id):
                     DocumentEventUtils \
                         .PostCommandAndUpdateNewElementProperties(
                             HOST_APP.uiapp, revit.doc,
-                            self.postable_keynote_command,
+                            postcmd,
                             "Update Keynotes",
-                            DB.BuiltInParameter.KEY_VALUE, sel.key)
-                except Exception as ex:
-                    forms.alert(str(ex))
+                            DB.BuiltInParameter.KEY_VALUE, sel_key)
+        self._revit_run(_do)
 
     # =========================================================================
     # FILE OPERATIONS
     # =========================================================================
 
     def change_keynote_file(self, sender, args):
-        self._change_kfile()
-        self._determine_kfile()
-        self._connect_kfile()
-        self._needs_update = True
-        self._update_full_tree()
-        self._update_status_bar()
-        self.Close()
+        kfile = forms.pick_file('txt')
+        if not kfile:
+            return
+        def _set_file():
+            with revit.Transaction("Set Keynote File"):
+                revit.update.set_keynote_file(kfile, doc=revit.doc)
+        def _reload():
+            self._determine_kfile()
+            self._connect_kfile()
+            self._needs_update = True
+            try:
+                self._used_keysdict = self.get_used_keynote_elements()
+            except Exception:
+                pass
+            self._update_full_tree()
+            self._update_status_bar()
+        self._revit_run(_set_file, callback=_reload)
 
     def show_keynote_file(self, sender, args):
         coreutils.show_entry_in_explorer(self._kfile)
@@ -1581,17 +1703,50 @@ class KeynoteManagerWindow(forms.WPFWindow):
     # =========================================================================
 
     def update_model(self, sender, args):
+        """Queue keynote update transaction and keep window open."""
+        if self._needs_update:
+            def _do_update():
+                with revit.Transaction("Update Keynotes"):
+                    revit.update.update_linked_keynotes(doc=revit.doc)
+            
+            def _on_update_complete():
+                self._needs_update = False
+                forms.alert("Revit model updated successfully.", title="Success")
+
+            self._revit_run(_do_update, callback=_on_update_complete)
+        else:
+            forms.alert("The Revit model is already up to date.", title="Up to Date")
+
+    def _finalize_close(self):
+        """Called on WPF thread after Revit update completes."""
+        self._needs_update = False
+        self._close_pending = True
         self.Close()
 
     def window_closing(self, sender, args):
+        global _active_window
+
+        # If we haven't synced yet and user closed via X button, ask
+        if self._needs_update and not self._close_pending:
+            res = forms.alert(
+                "Keynote file has been modified.\n"
+                "Sync changes to the Revit model before closing?",
+                yes=True, no=True)
+            if res:
+                args.Cancel = True
+                def _do_update():
+                    with revit.Transaction("Update Keynotes"):
+                        revit.update.update_linked_keynotes(doc=revit.doc)
+                self._close_pending = True
+                self._revit_run(_do_update, callback=self._finalize_close)
+                return
+
+        # Proceed with cleanup
         if self._kfile_handler == 'adc':
             try:
                 adc.unlock_file(self._kfile_ext)
             except Exception:
                 pass
-        if self._needs_update:
-            with revit.Transaction("Update Keynotes"):
-                revit.update.update_linked_keynotes(doc=revit.doc)
         try:
             self.save_config()
         except Exception as ex:
@@ -1601,6 +1756,7 @@ class KeynoteManagerWindow(forms.WPFWindow):
                 self._conn.Dispose()
             except Exception:
                 pass
+        _active_window = None
 
 
 # =============================================================================
@@ -1608,9 +1764,15 @@ class KeynoteManagerWindow(forms.WPFWindow):
 # =============================================================================
 
 try:
-    KeynoteManagerWindow(
-        xaml_file_name='KeynoteManagerWindow.xaml',
-        reset_config=__shiftclick__  #pylint: disable=undefined-variable
-    ).show(modal=True)
+    # Singleton: if already open, bring to front
+    if _active_window and _active_window.IsLoaded:
+        _active_window.Activate()
+        _active_window.WindowState = framework.Windows.WindowState.Normal
+    else:
+        _active_window = KeynoteManagerWindow(
+            xaml_file_name='KeynoteManagerWindow.xaml',
+            reset_config=__shiftclick__  #pylint: disable=undefined-variable
+        )
+        _active_window.show(modal=False)
 except Exception as kmex:
     forms.alert(str(kmex), expanded="Creating keynote manager window")

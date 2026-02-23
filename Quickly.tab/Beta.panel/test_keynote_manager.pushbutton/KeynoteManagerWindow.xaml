@@ -1,8 +1,8 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         ShowInTaskbar="False"
-        Width="920" Height="750"
-        MinWidth="640" MinHeight="480"
+        Width="720" Height="750"
+        MinWidth="720" MinHeight="480"
         ResizeMode="CanResizeWithGrip"
         WindowStartupLocation="Manual"
         Title="Keynote Manager"
@@ -293,7 +293,7 @@
                             Content="&#x21BB; Refresh" ToolTip="F5" Click="refresh"/>
                     <Rectangle Style="{StaticResource ToolbarSep}"/>
                     <Button Style="{StaticResource AccentButton}"
-                            Content="Update Model &amp; Close" Padding="14,4"
+                            Content="Update Model" Padding="14,4"
                             Click="update_model"/>
                 </StackPanel>
             </DockPanel>
