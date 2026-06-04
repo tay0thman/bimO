@@ -1,61 +1,71 @@
-#this script will select all the walls that are current attached at top using the value of the parameter WALL_TOP_IS_ATTACHED
-# this script uses pyrevit
+# -*- coding: utf-8 -*-
+# Author: Tay Othman
+"""Select all walls of the chosen types whose top is currently attached, scoped to picked levels or the active view.
 
-import pyrevit
-from pyrevit import revit, DB
-from pyrevit import script
-from pyrevit import forms
-from pyrevit import output
+Workflow:
+1. Pick one or more levels (or cancel the level picker to scope to the active view instead).
+2. Pick one or more wall types from the project.
+3. The script selects every wall whose type matches one of those picked
+   AND whose `Top is Attached` flag is on.
+"""
+from pyrevit import revit, DB, forms, script
 from System.Collections.Generic import List
 
-doc = __revit__.ActiveUIDocument.Document
-uidoc = __revit__.ActiveUIDocument
+__title__ = "Select Attached\nWalls by Type"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
 
-# Get the list of all levels in the model using pyrevit's selectlevel form
-levels = forms.select_levels(title='Select Levels', button_name='Select Levels', multiple=True)
-if not levels:
-    activeview = True
-else: activeview = False
+doc = revit.doc
+uidoc = revit.uidoc
 
+levels = forms.select_levels(
+    title="Select Levels  (Cancel to use the Active View)",
+    button_name="Use These Levels",
+    multiple=True,
+)
+use_active_view = not levels
+level_ids = {lvl.Id for lvl in levels} if levels else set()
 
-#use pyrevit form checkboxes to get a list of wall types to filter
-walltypes = DB.FilteredElementCollector(doc).OfCategory(DB.BuiltInCategory.OST_Walls).WhereElementIsElementType().ToElements()
-walltypenames = []
-for walltype in walltypes:
-    #get the name of the wall type
-    walltypename = walltype.get_Parameter(DB.BuiltInParameter.SYMBOL_NAME_PARAM).AsString()
-    walltypenames.append(walltypename)
+wall_types = (DB.FilteredElementCollector(doc)
+              .OfCategory(DB.BuiltInCategory.OST_Walls)
+              .WhereElementIsElementType()
+              .ToElements())
+wall_type_by_name = {wt.Name: wt for wt in wall_types}
+selected_type_names = forms.SelectFromList.show(
+    sorted(wall_type_by_name.keys()),
+    title="Select Wall Types",
+    button_name="Select",
+    multiselect=True,
+)
+if not selected_type_names:
+    script.exit()
+selected_type_ids = {wall_type_by_name[n].Id for n in selected_type_names}
 
-# use the SelectFromList form to get the wall types as names and output the selected wall types, if none selected, the script will exit
-typefiltername = forms.SelectFromList.show(walltypenames, button_name='Select Wall Types', multiselect=True)
-if not typefiltername:
-    # print html message to the output
-    # define h3 style with color red
-    output = script.get_output()
-    output.add_style('body { font-family: Calibri; font-size: 18px;  color: #FF0000;}')
-    output.print_html('<div class=body>!!  No wall types selected, script will exit  !!</div>')
-    raise SystemExit
-
-
-# get all the walls in the model that belong to the category OST_Walls and has a type name that contains the string "Braced"
-if activeview:
-    wall_collector = DB.FilteredElementCollector(doc, uidoc.ActiveView.Id).OfCategory(DB.BuiltInCategory.OST_Walls).WhereElementIsNotElementType().ToElements()
+if use_active_view:
+    candidate_walls = (DB.FilteredElementCollector(doc, uidoc.ActiveView.Id)
+                       .OfCategory(DB.BuiltInCategory.OST_Walls)
+                       .WhereElementIsNotElementType()
+                       .ToElements())
 else:
-    allwalls = DB.FilteredElementCollector(doc).OfCategory(DB.BuiltInCategory.OST_Walls).WhereElementIsNotElementType().ToElements()
-    wall_collector = []
-    for wall in allwalls:
-        if wall.LevelId in [level.Id for level in levels] and DB.Wall.CanHaveProfileSketch(wall):
-            wall_collector.append(wall)
-#filter the walls that have the parameter WALL_TOP_IS_ATTACHED set to true
-attached_braced_walls = []
-for wall in wall_collector:
-    for filtername in typefiltername:
-        if wall.Name.Contains(filtername):
-             if wall.get_Parameter(DB.BuiltInParameter.WALL_TOP_IS_ATTACHED).AsInteger() == 1:
-                attached_braced_walls.append(wall)
+    all_walls = (DB.FilteredElementCollector(doc)
+                 .OfCategory(DB.BuiltInCategory.OST_Walls)
+                 .WhereElementIsNotElementType()
+                 .ToElements())
+    candidate_walls = [w for w in all_walls
+                       if w.LevelId in level_ids and w.CanHaveProfileSketch()]
 
-            
-#exclude infill walls from the list
-attached_braced_walls = [wall for wall in attached_braced_walls if wall.HasPhases]
-#select the walls in the model
-uidoc.Selection.SetElementIds(List[DB.ElementId]([wall.Id for wall in attached_braced_walls]))
+matched_walls = []
+for wall in candidate_walls:
+    if wall.GetTypeId() not in selected_type_ids:
+        continue
+    top_attached = wall.get_Parameter(DB.BuiltInParameter.WALL_TOP_IS_ATTACHED)
+    if top_attached and top_attached.AsInteger() == 1:
+        matched_walls.append(wall)
+
+if not matched_walls:
+    forms.alert("No walls match the selected types with `Top is Attached` enabled.",
+                title="No Matches",
+                exitscript=True)
+
+uidoc.Selection.SetElementIds(List[DB.ElementId]([w.Id for w in matched_walls]))

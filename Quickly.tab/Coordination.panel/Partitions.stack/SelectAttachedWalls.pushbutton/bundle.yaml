@@ -1,14 +1,6 @@
-tooltip:
-
-  en_us: Select attached walls of a specific wall type
-
 title:
-
-  en_us: >-
-    Select Attached
-  
-    Walls by Type
-authors:
-  - 'Tay Othman'
-
-min_revit_version: 2023
+  en_us: "Select Attached\nWalls by Type"
+tooltip:
+  en_us: |
+    Select all walls in the active view (or on chosen levels) whose top is currently attached, filtered to the wall types you pick.
+    Useful when chasing down partitions that are attached to a structural ceiling, slab, or floor above.
