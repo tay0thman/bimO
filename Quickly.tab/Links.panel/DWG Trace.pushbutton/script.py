@@ -1,10 +1,21 @@
 # -*- coding: utf-8 -*-
-# pylint: disable=import-error
-# pylint: disable=invalid-name, no-member, too-many-locals, unused-import
+# Author: Tay Othman
+"""Trace a DWG/DXF import as native Revit detail elements.
+
+Lines, arcs, ellipses, and curves are traced with a chosen line style.
+Solid regions become filled regions of a chosen filled-region type.
+Optionally halftones the source CAD afterward so the new trace stands out.
+"""
+# pylint: disable=import-error,invalid-name,no-member,too-many-locals,unused-import
 from pyrevit import revit, DB, forms, script
 from System.Collections.Generic import List
 
 from rpw.ui.forms import FlexForm, Label, Separator, Button, ComboBox, CheckBox
+
+__title__ = "DWG Trace"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
 
 doc = revit.doc
 uidoc = revit.uidoc
@@ -154,42 +165,30 @@ def show_rpw_ui():
     return filled_region_type, line_style, halftone_source_cad
 
 if __name__ == "__main__":
-    filled_region = query_filled_region_types()
-    line_style = query_line_styles()
-    selected_types = show_rpw_ui()
+    selected_filled_region_type, selected_line_style, halftone_source = show_rpw_ui()
 
-    #prompt to select an Import Instance
-    selection = revit.pick_element(
-        "Select an Import Instance to get its geometry")
-    if not selection:
+    import_instance = revit.pick_element(
+        "Select a DWG/DXF Import Instance to trace")
+    if not import_instance:
         forms.alert("No import instance selected.", exitscript=True)
-    else:
-        # Get the selected import instance geometry
-        import_instance = selection
-        if not isinstance(import_instance, DB.ImportInstance):
-            forms.alert("Selected element is not an Import Instance.", exitscript=True)
-        # Get the geometry of the import instance
-        geometry = import_instance.get_Geometry(DB.Options())
+    if not isinstance(import_instance, DB.ImportInstance):
+        forms.alert("Selected element is not a DWG/DXF Import Instance.", exitscript=True)
 
     geometry_elements = []
-    for geom in geometry:
+    for geom in import_instance.get_Geometry(DB.Options()):
         for g in geom.GetInstanceGeometry():
             geometry_elements.append(g)
-    t = DB.Transaction(doc, "Trace Import Instance Geometry")
-    t.Start()
-    x = create_detail_lines_from_geometry(
-                                            geometry_elements, 
-                                            selected_types[0], 
-                                            selected_types[1])
-    if selected_types[2]:
-        # set the detail lines to halftone
-        override_settings = DB.OverrideGraphicSettings()
-        override_settings.SetHalftone(True)
-        doc.ActiveView.SetElementOverrides(import_instance.Id, override_settings)
-    t.Commit()
-    if x:
-        # convert the list of element ids to Icollection
-        dotnet_list = List[DB.ElementId](x)
-        # assign to ICollection
-        icoll = dotnet_list  # List[DB.ElementId] already implements ICollection
-        uidoc.Selection.SetElementIds(icoll)
+
+    with revit.Transaction("Trace Import Instance Geometry"):
+        created_ids = create_detail_lines_from_geometry(
+            geometry_elements,
+            selected_filled_region_type,
+            selected_line_style,
+        )
+        if halftone_source:
+            override_settings = DB.OverrideGraphicSettings()
+            override_settings.SetHalftone(True)
+            doc.ActiveView.SetElementOverrides(import_instance.Id, override_settings)
+
+    if created_ids:
+        uidoc.Selection.SetElementIds(List[DB.ElementId](created_ids))

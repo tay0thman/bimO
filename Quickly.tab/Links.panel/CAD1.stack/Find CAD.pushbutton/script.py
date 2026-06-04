@@ -1,68 +1,55 @@
-#This script uses python and Revit API to find the CAD file of the selected element
-# Using pyrevit libraries
-import clr
-clr.AddReference('RevitAPI')
-clr.AddReference('RevitServices')
-from Autodesk.Revit.DB import *
-from Autodesk.Revit.DB import FilteredElementCollector, ImportInstance
-# import pyrevit forms
-from pyrevit import script
-from pyrevit import forms
-from pyrevit import revit
-from pyrevit import DB
-from pyrevit import HOST_APP
+# -*- coding: utf-8 -*-
+# Author: Tay Othman
+"""Categorize every CAD import / link in the project and list each one with a clickable element link.
 
-# get the current document
-doc = __revit__.ActiveUIDocument.Document
+Three buckets:
+- **Linked Model CADs**  — linked, 3D-scope (visible across all views by default).
+- **Linked Detail CADs** — linked, view-specific (placed in a single view).
+- **Non-Linked CADs**    — embedded imports (no live source file).
+"""
+from pyrevit import revit, DB, script
+
+__title__ = "Find CAD"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
+
+doc = revit.doc
 output = script.get_output()
 
-# collect all the CAD links in the document
-cad_links = FilteredElementCollector(doc).OfClass(ImportInstance).ToElementIds()
 
-modelbased = []
-modelbasednames = []
-detailbaesd = []
-detailbasednames = []
-nonlinked = []
-nonlinkednames = []
+def _cad_display_name(cad):
+    return cad.get_Parameter(DB.BuiltInParameter.IMPORT_SYMBOL_NAME).AsString() or "<unnamed>"
 
-for cad_link in cad_links:
-    cadlinkelement = doc.GetElement(cad_link)
-    if cadlinkelement.IsLinked == False:
-        nonlinked.append(cadlinkelement)
-        # get the catrgory name if the link is not linked
-        nonlinkednames.append(cadlinkelement.get_Parameter(BuiltInParameter.IMPORT_SYMBOL_NAME).AsString())
-        pass
+
+cad_imports = list(DB.FilteredElementCollector(doc).OfClass(DB.ImportInstance))
+
+model_linked = []
+detail_linked = []
+embedded = []
+
+for cad in cad_imports:
+    if not cad.IsLinked:
+        embedded.append(cad)
+        continue
+    owner_view = doc.GetElement(cad.OwnerViewId)
+    if owner_view is None:
+        model_linked.append(cad)
     else:
-        #determine if OwnerViewId is a valid view
-        owner_view = doc.GetElement(cadlinkelement.OwnerViewId)
-        if owner_view == None:
-            modelbased.append(cadlinkelement)
-            modelbasednames.append(cadlinkelement.get_Parameter(BuiltInParameter.IMPORT_SYMBOL_NAME).AsString())
-        else:
-            detailbaesd.append(cadlinkelement)
-            detailbasednames.append(cadlinkelement.get_Parameter(BuiltInParameter.IMPORT_SYMBOL_NAME).AsString())
+        detail_linked.append(cad)
 
-#define HTML style for header text
-output.add_style('header {font-size: 20px; color: #000000;}')
 
-#display the results
-output.print_md('### Linked Model CADs')
+def _print_group(title, items):
+    output.print_md("### {} ({})".format(title, len(items)))
+    if not items:
+        output.print_md("_None._\n")
+        return
+    for cad in items:
+        output.print_md("- {}  {}".format(output.linkify(cad.Id), _cad_display_name(cad)))
+    output.print_md("")
 
-for modelbased_link in modelbased:
-    modelbased_linkId = modelbased_link.Id
-    print(output.linkify(modelbased_linkId) + modelbased_link.get_Parameter(BuiltInParameter.IMPORT_SYMBOL_NAME).AsString())
 
-# add some space and a separator
-output.print_md('---')
-output.print_md('### Linked Detail CADs')
-for detailbased_link in detailbaesd:
-    detailbased_linkId = detailbased_link.Id
-    print(output.linkify(detailbased_linkId) + detailbased_link.get_Parameter(BuiltInParameter.IMPORT_SYMBOL_NAME).AsString())
-# add some space and a separator
-output.print_md('---')
-
-output.print_md('### Non-Linked CADs')
-for nonlinked_link in nonlinked:
-    nonlinked_linkId = nonlinked_link.Id
-    print(output.linkify(nonlinked_linkId) + nonlinked_link.get_Parameter(BuiltInParameter.IMPORT_SYMBOL_NAME).AsString())
+output.print_md("# CAD Inventory")
+_print_group("Linked Model CADs", model_linked)
+_print_group("Linked Detail CADs", detail_linked)
+_print_group("Non-Linked CADs (embedded imports)", embedded)

@@ -1,93 +1,75 @@
 # -*- coding: utf-8 -*-
-__title__   = "Sync Link Graphics"
-__doc__     = """Version = 1.0
-Date    = 09.09.2024
-________________________________________________________________
-Description:
-Colorize a selected revit link in a selected view template
-________________________________________________________________
-How-To:
-1. Select a Revit Link to transfer overrides
-2. Select a source view template to use as a reference
-3. Select multiple view templates to apply the overrides to
-________________________________________________________________
-TODO:
-[FEATURE] - 1- Pending user feedback
-[FEATURE] - 2- Pending Revit API Updates
-________________________________________________________________
-Last Updates:
-- [09.09.2024] v0.1 Initial Prototype
-________________________________________________________________
-Author: Tay Othman"""
+# Author: Tay Othman
+"""Copy a Revit link's graphic overrides from a source view template to multiple target view templates.
 
-#============================================ IMPORTS
+Workflow:
+1. Pick the Revit link whose overrides you want to propagate.
+2. Pick the source view template that already has the desired overrides for that link.
+3. Pick one or more target view templates to push those overrides to.
+"""
+from pyrevit import revit, DB, forms, script
 
-#Revit API
-import sys
-from Autodesk.Revit.DB import *
+__title__ = "Sync Link\nGraphics"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
 
-#.NET Imports
-import clr
-clr.AddReference('System')
-from System.Collections.Generic import List
-clr.AddReference('RevitAPI')
-from Autodesk.Revit.DB import *
+doc = revit.doc
 
-#pyRevit
-from pyrevit import revit, DB
-from pyrevit import script
-from pyrevit import forms
+link_types = list(DB.FilteredElementCollector(doc).OfClass(DB.RevitLinkType))
+if not link_types:
+    forms.alert("No Revit links found in this project.",
+                title="No Links",
+                exitscript=True)
 
-#============================================ VARIABLES
-app    = __revit__.Application
-uidoc  = __revit__.ActiveUIDocument
-doc    = __revit__.ActiveUIDocument.Document #type:Document
+link_by_name = {lt.get_Parameter(DB.BuiltInParameter.SYMBOL_NAME_PARAM).AsString(): lt
+                for lt in link_types}
 
-# prompt user to select a Revit Link
-linknames = []
-linkcollector = FilteredElementCollector(doc).OfClass(RevitLinkType).ToElements()
-for link in linkcollector:
-    linkname = link.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM).AsString()
-    linknames.append(linkname)
-link = forms.SelectFromList.show(linknames, button_name='Select Revit Link To Override', title='Select Revit Link', multiselect=False)
-if not link:
-    sys.exit()
+selected_link_name = forms.SelectFromList.show(
+    sorted(link_by_name.keys()),
+    title="Select Revit Link",
+    button_name="Use This Link",
+    multiselect=False,
+)
+if not selected_link_name:
+    script.exit()
+selected_link = link_by_name[selected_link_name]
+link_id = selected_link.Id
 
-# Get the index of the selected link
-linkindex = linknames.index(link)
-selection = linkcollector[linkindex]
+source_template = forms.select_viewtemplates(
+    title="Select SOURCE View Template (the one with the overrides you want to copy)",
+    button_name="Use As Source",
+    multiple=False,
+)
+if not source_template:
+    script.exit()
 
+target_templates = forms.select_viewtemplates(
+    title="Select TARGET View Templates (overrides will be pushed to these)",
+    button_name="Apply Overrides",
+)
+if not target_templates:
+    script.exit()
 
+source_overrides = source_template.GetLinkOverrides(link_id)
 
-# prompt user to select a view template
-viewtemplate = forms.select_viewtemplates(title='Select Source View Template', button_name='Select View Template',multiple=False)
-if not viewtemplate:
-    sys.exit()
+succeeded = []
+failed = []
+with revit.Transaction("Sync Link Graphic Overrides"):
+    for vt in target_templates:
+        try:
+            vt.SetLinkOverrides(link_id, source_overrides)
+            succeeded.append(vt.Name)
+        except Exception as ex:
+            failed.append((vt.Name, str(ex)))
 
-
-templateID = viewtemplate.Id
-linkID = selection.Id
-vt = doc.GetElement(templateID)
-viewsource = doc.ActiveView
-
-viewtemplates = forms.select_viewtemplates(title='Select View Template', button_name='Select View Template')
-if not viewtemplates:
-    sys.exit()
-
-Transaction = DB.Transaction(doc, 'Update Overrides')
-Transaction.Start()
-link_settings = RevitLinkGraphicsSettings()
-link_settings.LinkVisibilityType = LinkVisibility.Custom
-link_settings.LinkedViewId = templateID
-ls = vt.GetLinkOverrides(linkID)
-print(ls)
-# prompt user to select a view template
-for view in viewtemplates:
-    try:
-        view.SetLinkOverrides(linkID, ls)
-        print(view.Name , '-----------Link Colorized')
-    except:
-        view.SetLinkOverrides(linkID, ls)
-        print(view.Name , '-----------Link Failed')
-Transaction.Commit()
-
+output = script.get_output()
+output.print_md("# Sync Link Graphics — {}".format(selected_link_name))
+output.print_md("**Source template:** {}".format(source_template.Name))
+output.print_md("\n**Applied to {} template(s):**".format(len(succeeded)))
+for name in succeeded:
+    output.print_md("- {}".format(name))
+if failed:
+    output.print_md("\n**Failed on {} template(s):**".format(len(failed)))
+    for name, err in failed:
+        output.print_md("- `{}` — {}".format(name, err))

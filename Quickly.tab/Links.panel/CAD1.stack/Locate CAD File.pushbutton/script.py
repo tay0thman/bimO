@@ -6,6 +6,11 @@ import os
 
 from pyrevit import revit, DB, forms, script
 
+__title__ = "Locate CAD\nFile"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
+
 doc = revit.doc
 
 selection = revit.get_selection()

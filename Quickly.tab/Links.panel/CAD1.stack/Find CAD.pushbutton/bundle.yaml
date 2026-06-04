@@ -1,0 +1,6 @@
+title:
+  en_us: Find CAD
+tooltip:
+  en_us: |
+    Categorize every CAD import / link in the project into Linked Model CADs (3D-scope linked), Linked Detail CADs (view-specific linked), and Non-Linked CADs (embedded imports). Each item is listed with a clickable element link.
+context: doc-required
