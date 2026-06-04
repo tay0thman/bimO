@@ -157,8 +157,6 @@ if __name__ == "__main__":
     filled_region = query_filled_region_types()
     line_style = query_line_styles()
     selected_types = show_rpw_ui()
-    script.exit
-
 
     #prompt to select an Import Instance
     selection = revit.pick_element(

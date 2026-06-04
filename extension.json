@@ -1,0 +1,9 @@
+{
+    "name": "Quickly",
+    "author": "Tay Othman, AIA",
+    "description": "A productivity-focused pyRevit extension by an architect, for architects. Quickly is a curated set of Revit tools that streamline repetitive drawing-set, annotation, coordination, and measurement tasks.",
+    "url": "https://github.com/tay0thman/Quickly",
+    "website": "https://github.com/tay0thman/Quickly",
+    "image": "https://raw.githubusercontent.com/tay0thman/Quickly/Beta/Quickly.tab/icon.png",
+    "templates_url": ""
+}

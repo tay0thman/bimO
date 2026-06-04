@@ -35,7 +35,6 @@ for i, viewport in enumerate(viewports):
          xn = "Xx" + str(ranindex)
          view.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER).Set(xn)
          tx.Commit()
-         break
     
 
 # Create a list of the sheet domains (30" x 42")
@@ -68,8 +67,8 @@ for i, viewport in enumerate(viewports):
     # Find the corresponding domains_2d index that corresponds to the viewport's center
     for k, domain in enumerate(domains_2d):
         if quarter_point.X >= domain[0][0] and quarter_point.X <= domain[0][1] and quarter_point.Y >= domain[1][0] and quarter_point.Y <= domain[1][1]:
-            detnum = str(k+1)  # add 1 to the
-            print detnum + " - " + view.Name
+            detnum = str(k+1)
+            print(detnum + " - " + view.Name)
             # Set the VIEWPORT_DETAIL_NUMBER parameter to the viewport
             with Transaction(doc, 'Set View Properties') as tx:
                 tx.Start()
