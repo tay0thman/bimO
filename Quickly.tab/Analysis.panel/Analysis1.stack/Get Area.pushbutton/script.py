@@ -1,41 +1,34 @@
-from pyrevit import script, DB, forms
-from pyrevit.forms import alert
+# -*- coding: utf-8 -*-
+# Author: Tay Othman
+"""Sum the Area parameter across the current selection and report the total in the project's area units."""
+from pyrevit import revit, DB, forms, script
 
-__title__ = 'Get Area'
-__author__  = 'Tay Othman, AIA'
+__title__ = "Get Area"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
 
-def get_area(element):
-    # Get the area of the element
-    area = element.LookupParameter('Area').AsDouble()
-    # Return the area
-    return area
+doc = revit.doc
 
-def format_area(area):
-    # Format the area as a string
-    formatted_area = str(area) + ' sqft'
-    # Return the formatted area
-    return formatted_area
+elements = revit.get_selection().elements
+if not elements:
+    forms.alert("Select one or more area-bearing elements first (rooms, areas, floors, sheets, etc.).",
+                title="No Selection",
+                exitscript=True)
 
-def get_total_area(selection):
-    # Get the current Revit document
-    doc = __revit__.ActiveUIDocument.Document
-    # Initialize the total area to zero
-    total_area = 0
-    # Get the area of each selected element
-    for element_id in selection:
-        # Get the element from the element id
-        element = doc.GetElement(element_id)
-        # Get the area of the element
-        area = get_area(element)
-        # Add the area to the total area
-        total_area += area
-    # Return the total area
-    formatted_total_area = format_area(total_area)
-    return formatted_total_area
+total_area = 0.0
+counted = 0
+for el in elements:
+    area_param = el.LookupParameter("Area")
+    if area_param and area_param.StorageType == DB.StorageType.Double:
+        total_area += area_param.AsDouble()
+        counted += 1
 
-# Get the current Revit document
-doc = __revit__.ActiveUIDocument.Document
+if counted == 0:
+    forms.alert("None of the selected elements have an Area parameter.",
+                title="No Area",
+                exitscript=True)
 
-# Get the selected elements
-selection = __revit__.ActiveUIDocument.Selection.GetElementIds()
-forms.alert(msg=get_total_area(selection), title='Total Area', exitscript=True)
+formatted = DB.UnitFormatUtils.Format(doc.GetUnits(), DB.SpecTypeId.Area, total_area, False)
+forms.alert("Total area across {} element(s):\n\n{}".format(counted, formatted),
+            title="Total Area")

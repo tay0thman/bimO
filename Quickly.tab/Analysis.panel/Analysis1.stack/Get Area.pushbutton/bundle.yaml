@@ -1,0 +1,7 @@
+title:
+  en_us: Get Area
+tooltip:
+  en_us: |
+    Sum the Area parameter across the current selection and show the total in the project's area units.
+    Skips elements with no Area parameter.
+context: selection

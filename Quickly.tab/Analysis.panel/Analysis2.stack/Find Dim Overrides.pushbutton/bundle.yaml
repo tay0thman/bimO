@@ -1,14 +1,7 @@
-tooltip:
-
-  en_us: Detect a list of overridden dimensions in the active view or the entire project, provides an output summary and a list of the dimensions.
-
 title:
-
-  en_us: >-
-    Find Dimension
-  
-    Overrides
-authors:
-  - 'Tay Othman'
-
-min_revit_version: 2020
+  en_us: "Find Dimension\nOverrides"
+tooltip:
+  en_us: |
+    Detect dimensions whose Value Override text has been replaced by a manual string (e.g. "VERIFY", "+/-", a hand-typed dimension).
+    Scope can be the active view or the entire project. Output lists every overridden dimension with its true value, override text, and a clickable element link.
+context: doc-required

@@ -1,74 +1,51 @@
-from pyrevit import script
-from pyrevit import revit, DB
-from pyrevit import forms
-from pyrevit import HOST_APP
-from Autodesk.Revit.DB import *
-from Autodesk.Revit.UI import *
-from pyrevit import output
-import sys
-import os
+# -*- coding: utf-8 -*-
+# Author: Tay Othman
+"""Detect dimensions whose Value Override text has been replaced with a manual string.
+
+Scope can be the active view or the entire document. Each flagged dimension is listed
+with its true displayed value, its override text, and a clickable element link.
+"""
+from pyrevit import revit, DB, forms, script
+
+__title__ = "Find Dimension\nOverrides"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
+
+doc = revit.doc
 output = script.get_output()
 
-__title__ = 'Find Dim Overrides'
-__author__  = 'Tay Othman, AIA'
+scope = forms.CommandSwitchWindow.show(
+    ["Active View", "Entire Document"],
+    message="Choose search scope",
+)
+if not scope:
+    script.exit()
 
-# Prompt user to select an option (Active View or Entire Document)
-ops = 'Active View', 'Entire Document'
-formfilter = forms.CommandSwitchWindow.show(ops, message='Select an option:', title='Find Dim Overrides', exit=False)
-if formfilter == 'Active View':
-    ff = 0
-    pass
-elif formfilter == 'Entire Document':
-    ff = 1
-    pass
+if scope == "Active View":
+    view = revit.active_view
+    collector = DB.FilteredElementCollector(doc, view.Id).OfClass(DB.Dimension)
+else:
+    collector = DB.FilteredElementCollector(doc).OfClass(DB.Dimension)
 
-if ff == None:
-    sys.exit()
-elif ff == 1:
-    # Get all the dimensions in the document
-    doc = __revit__.ActiveUIDocument.Document
-    collector = FilteredElementCollector(doc)
-    dimCollector = collector.OfClass(Dimension)
-    dimList = list(dimCollector)
+dims = list(collector)
+overridden = [d for d in dims
+              if isinstance(d.ValueOverride, str) and d.ValueOverride.strip()]
 
-elif ff == 0:
-    # Get all the dimensions in the active view
-    doc = __revit__.ActiveUIDocument.Document
-    view = __revit__.ActiveUIDocument.ActiveGraphicalView
-    collector = FilteredElementCollector(doc, view.Id)
-    dimCollector = collector.OfClass(Dimension)
-    dimList = list(dimCollector)
+output.print_md("# Dimension Overrides — {}".format(scope))
+output.print_md("- Dimensions scanned: **{}**".format(len(dims)))
+output.print_md("- Overridden: **{}**".format(len(overridden)))
 
-print('Total number of dimensions: ' + str(len(dimList)))
+if not overridden:
+    output.print_md("\nNothing to report.")
+    script.exit()
 
-# enumerate through the list of dimensions and get the overrides
-overriDIMs = []
-for i, dim in enumerate(dimList):
-    valtype = dim.ValueOverride
-    if isinstance(valtype, str) and valtype != '':
-        overriDIMs.append(dim)
+output.add_style("overridden { background-color: #ff0000; color: #fff; font-weight: bold; padding: 0 4px; }")
+output.add_style("truevalue  { background-color: #1e90ff; color: #fff; font-weight: bold; padding: 0 4px; }")
 
-
-print('Total number of dimensions with overrides: ' + str(len(overriDIMs)))
-print('_________________________________________________________')
-print('')
-print('')
-# define output styles
-output.add_style('overriden {background-color: #ff0000; color: #ffffff; font-weight: bold;}')
-output.add_style('truevalue {background-color: #f38b0b; color: #ffffff; font-weight: bold;}')
-
-
-# display the overrides in a linkify format
-if len(overriDIMs) > 0:
-    # create a list of links
-    linklist = []
-    for dim in overriDIMs:
-        linklist.append(dim)
-
-    # create a linkify output window
-for lnk in linklist:
-    lnkOvv = lnk.ValueOverride
-    lnkval = lnk.ValueString
-    seperator = ' - overridden value: -'
-
-    output.print_html('<truevalue>{}</truevalue>{}<overriden>{}</overriden>{}'.format(lnkval, seperator, lnkOvv, output.linkify(lnk.Id)))
+for dim in overridden:
+    true_val = dim.ValueString or "—"
+    output.print_html(
+        "<truevalue>{}</truevalue> &nbsp; → &nbsp; <overridden>{}</overridden> &nbsp; {}"
+        .format(true_val, dim.ValueOverride, output.linkify(dim.Id))
+    )

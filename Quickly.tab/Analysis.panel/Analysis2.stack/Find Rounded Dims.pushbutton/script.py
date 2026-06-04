@@ -1,129 +1,98 @@
-from pyrevit import script
-from pyrevit import revit, DB
-from pyrevit import forms
-from pyrevit import HOST_APP
-from Autodesk.Revit.DB import *
-from Autodesk.Revit.UI import *
-from pyrevit import output 
-import sys
-import os
+# -*- coding: utf-8 -*-
+# Author: Tay Othman
+"""Detect dimensions whose displayed text differs from the true measurement at a chosen tolerance.
+
+Useful for catching dims that have been visually rounded by the dim style (e.g. "10'-0\"" when the actual length is 10'-0 1/4"). User-overridden dimensions are skipped — use Find Dimension Overrides for those.
+"""
+from fractions import Fraction
+
+from pyrevit import revit, DB, forms, script
+
+__title__ = "Find Rounded\nDims"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
+
+doc = revit.doc
 output = script.get_output()
 
-__title__ = 'Find Rounded Dims'
-__author__  = 'Tay Othman, AIA'
-# define a function to convert a decimal number to a feet and fractional inches string rounded to the nearest Tolerance Level
-def dec_to_feet(dec, tol_in):
-    # Seperate Whole Feet from the Decimal
-    Whole_feet = int(dec)
-    # Get the Whole Number of inches
-    inches = int((dec - Whole_feet) * 12)
-    # Get the Fractional Inches
-    frac = int(round(((dec - Whole_feet) * 12 - inches) * tol_in))
-    if frac == tol_in:
+TOLERANCES = {"1/16": 16, "1/32": 32, "1/64": 64, "1/128": 128, "1/256": 256}
+
+tol_label = forms.CommandSwitchWindow.show(
+    list(TOLERANCES.keys()),
+    message="Tolerance — flag dims displayed less precisely than this",
+)
+if not tol_label:
+    script.exit()
+denom = TOLERANCES[tol_label]
+
+LINEAR_SHAPES = {
+    DB.DimensionShape.Linear,
+    DB.DimensionShape.Radial,
+    DB.DimensionShape.Diameter,
+    DB.DimensionShape.ArcLength,
+}
+
+
+def _dec_feet_to_text(value_ft, denominator):
+    """Render value (in internal feet) as feet-inches-fraction at 1/denominator-inch resolution."""
+    feet = int(value_ft)
+    remaining_inches = (value_ft - feet) * 12.0
+    inches = int(remaining_inches)
+    units = int(round((remaining_inches - inches) * denominator))
+    if units == denominator:
         inches += 1
-        frac = 0
+        units = 0
     if inches == 12:
-        Whole_feet += 1
+        feet += 1
         inches = 0
-    feet = Whole_feet
-    # Return the Feet and Fractional Inches as a String
-    if frac == 0:
-        if feet == 0:
-            # Return Fractional Inches only
-            return str(inches) +'"'
-        else:
-            # Return Whole Feet and Inches
-            return str(feet) + "'-" + str(inches) + '"'
-    else:
-        # shrink the values to the lowest common denominator
-        if frac % 2 == 0:
-            frac = int(frac / 2)
-            tol_in = int(tol_in / 2)
-        if frac % 2 == 0:
-            frac = int(frac / 2)
-            tol_in = int(tol_in / 2)
-        if frac % 2 == 0:
-            frac = int(frac / 2)
-            tol_in = int(tol_in / 2)
-        if frac % 2 == 0:  
-            frac = int(frac / 2)
-            tol_in = int(tol_in / 2)
-        if frac % 2 == 0:
-            frac = int(frac / 2)
-            tol_in = int(tol_in / 2)
-        if frac % 2 == 0:
-            frac = int(frac / 2)
-            tol_in = int(tol_in / 2)
-        # Convert the Fractional Inches to a String
-        frac_txt = str(frac) + str("/" + str(tol_in))
-        # if the value of feet = 0, then return the fractional inches only
-        if feet == 0:
-            return str(inches) + " " + str(frac_txt) + '"'
-        else:
-            return str(feet) + "'-" + str(inches) + " " + str(frac_txt) + '"'
-   
-
-# prompt the user to select a tolerance level
-tol = forms.CommandSwitchWindow.show(["1/16", "1/32", "1/64", "1/128", "1/256"], message="Select Tolerance Level", title="Tolerance Level", exit_on_close=True)
-if tol == "1/16":
-    tol = 16
-elif tol == "1/32":
-    tol = 32
-elif tol == "1/64":
-    tol = 64
-elif tol == "1/128":
-    tol = 128
-elif tol == "1/256":
-    tol = 256
-
-# define output styles
-output.add_style('overriden {background-color: #ff0000; color: #ffffff; font-weight: bold;}')
-output.add_style('truevalue {background-color: #1e90ff; color: #ffffff; font-weight: bold;}')
-
-# Collect All the Dimensions in the Document
-doc = __revit__.ActiveUIDocument.Document
-collector = FilteredElementCollector(doc)
-collector.OfCategory(BuiltInCategory.OST_Dimensions)
-collector.OfClass(Dimension)
-dimCollector = collector.ToElements()
-
-filtered_dimCollector = []
-
-# Find and exlude the dimensions that has overridden values
-for dim in dimCollector:
-    if dim.ValueOverride == None:
-        filtered_dimCollector.append(dim)
-
-# Get the value string of each dimension
-lin_dimVals = []
-lin_dimValsRounded = []
-lin_dimList = []
-dshape = []
-counter = 0
-for dim in filtered_dimCollector:
-    dshape = dim.DimensionShape
-    if  dshape == DimensionShape.Linear or dshape == DimensionShape.Radial or dshape == DimensionShape.Diameter or dshape == DimensionShape.ArcLength:
-        lin_dimVals.append(dim.Value)
-        lin_dimValsRounded.append(dim.ValueString)
-        #compare the value string to the value and if they are not equal, add the dimension to a list
-        if dim.ValueString:
-            # If dim.valuestring is starts with 0' - then remove it
-            
-            if str(dim.ValueString).startswith("0'-"):
-                ValueString= str(dim.ValueString[4:])
-            else:
-                ValueString= str(dim.ValueString)
-              
-            if ValueString != str(dec_to_feet(dim.Value, tol)):
-             counter += 1
-             # lin_dimList.append(dim)
-             # print the value string and the value
-             # output with linkfy to the element
-             truval = ValueString
-             # rndval = str(dec_to_feet(dim.Value, tol))
-             rndval = dec_to_feet(dim.Value, tol)
-             seperator = '   >>>>>>>>>>>>>>>>>>>    '
-             output.print_html('<truevalue>{}</truevalue>{}<overriden>{}</overriden>{}'.format(truval, seperator, rndval, output.linkify(dim.Id)))
+    if units == 0:
+        return '{}"'.format(inches) if feet == 0 else "{}'-{}\"".format(feet, inches)
+    f = Fraction(units, denominator)  # auto-reduces 8/16 -> 1/2 etc.
+    frac_text = "{}/{}".format(f.numerator, f.denominator)
+    if feet == 0:
+        return '{} {}"'.format(inches, frac_text)
+    return "{}'-{} {}\"".format(feet, inches, frac_text)
 
 
-print ("Total count of rounded dimensions: " + str(counter) + " out of " + str(len(lin_dimVals)) + " dimensions")
+def _normalize(s):
+    """Collapse whitespace and strip a leading 0'- so the rounded text can be compared cleanly."""
+    s = s.strip()
+    if s.startswith("0'-"):
+        s = s[3:].lstrip()
+    return " ".join(s.split())
+
+
+dims = list(DB.FilteredElementCollector(doc)
+            .OfCategory(DB.BuiltInCategory.OST_Dimensions)
+            .OfClass(DB.Dimension))
+
+flagged = []
+checked = 0
+for dim in dims:
+    if dim.ValueOverride:
+        continue
+    if dim.DimensionShape not in LINEAR_SHAPES:
+        continue
+    if dim.Value is None or not dim.ValueString:
+        continue
+    checked += 1
+    rounded = _dec_feet_to_text(dim.Value, denom)
+    if _normalize(dim.ValueString) != _normalize(rounded):
+        flagged.append((dim.ValueString, rounded, dim))
+
+output.print_md("# Rounded Dimensions — Tolerance {}".format(tol_label))
+output.print_md("- Dimensions checked: **{}**".format(checked))
+output.print_md("- Flagged: **{}**".format(len(flagged)))
+
+if not flagged:
+    script.exit()
+
+output.add_style("dispval { background-color: #ff0000; color: #fff; font-weight: bold; padding: 0 4px; }")
+output.add_style("rndval  { background-color: #1e90ff; color: #fff; font-weight: bold; padding: 0 4px; }")
+
+for display, rounded, dim in flagged:
+    output.print_html(
+        "<dispval>{}</dispval> &nbsp; vs &nbsp; <rndval>{}</rndval> &nbsp; {}"
+        .format(display, rounded, output.linkify(dim.Id))
+    )

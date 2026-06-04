@@ -1,14 +1,7 @@
-tooltip:
-
-  en_us: Find and Report Coordinates of the Active Project
-
 title:
-
-  en_us: >-
-    Find Project
-  
-    Coordinates
-authors:
-  - 'Tay Othman'
-
-min_revit_version: 2020
+  en_us: "Find Project\nCoordinates"
+tooltip:
+  en_us: |
+    Report the project's Internal Origin, Project Base Point, Survey Point, Shared Coordinates, and Angle to True North.
+    Output uses the project's display units (e.g. feet–inches, degrees).
+context: doc-required

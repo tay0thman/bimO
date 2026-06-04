@@ -1,0 +1,6 @@
+title:
+  en_us: Get Length
+tooltip:
+  en_us: |
+    Sum lengths of selected walls (location curve) and curve-element lines/arcs and show the total in the project's length units.
+context: selection
