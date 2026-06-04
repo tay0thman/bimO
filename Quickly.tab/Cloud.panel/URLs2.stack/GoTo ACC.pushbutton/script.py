@@ -1,41 +1,38 @@
 # -*- coding: utf-8 -*-
-__title__ = 'Go To ACC'
-__author__  = 'Tay Othman, AIA'
-__doc__ = """This script will open the Autodesk Construction Cloud (ACC) website for the current project in the default web browser.
-            Author: Tay Othman, AIA """
+# Author: Tay Othman
+"""Open the current project's home page on Autodesk Construction Cloud (ACC) in the default web browser.
 
-# _________________________________________________________________________________________.NET imports
-import clr
-clr.AddReference('RevitAPI')
-from Autodesk.Revit.DB import Document
-from Autodesk.Revit.UI import TaskDialog
+The project must be hosted on ACC / BIM 360 for this to work; local files will be reported with a friendly message.
+"""
 import webbrowser
-import os
 
-# _________________________________________________________________________________________Get the current version of Revit
-revit_version = __revit__.Application.VersionNumber
-doc = __revit__.ActiveUIDocument.Document
+from pyrevit import revit, DB, forms, script
 
-if revit_version == "2020":
-    # Show a task dialog with the message
-    TaskDialog.Show("Revit Version", "Revit Version is 2020, this tool is compatible with Revit 2022 and Newer")
-elif revit_version == "2022":
-    # Continue running the script
-    doc = __revit__.ActiveUIDocument.Document
-    hub_id = Document.GetHubId(doc)
-    proj_id = Document.GetProjectId(doc)
-    hub_str = hub_id[2:]
-    proj_str = proj_id[2:]
-    accurl = "https://acc.autodesk.com/insight/accounts/" + hub_str + "/projects/" + proj_str + "/home"
-    # TaskDialog.Show("GetHubId and GetProjectId", accurl)
-    webbrowser.open_new_tab(accurl)
-else:
-    # Continue running the script
-    doc = __revit__.ActiveUIDocument.Document
-    hub_id = Document.GetHubId(doc)
-    proj_id = Document.GetProjectId(doc)
-    hub_str = hub_id[2:]
-    proj_str = proj_id[2:]
-    accurl = "https://acc.autodesk.com/insight/accounts/" + hub_str + "/projects/" + proj_str + "/home"
-    # TaskDialog.Show("GetHubId and GetProjectId", accurl)
-    webbrowser.open_new_tab(accurl)
+__title__ = "Go To ACC"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
+
+doc = revit.doc
+
+try:
+    hub_id = DB.Document.GetHubId(doc)
+    proj_id = DB.Document.GetProjectId(doc)
+except Exception:
+    forms.alert("This tool only works for projects hosted on Autodesk Construction Cloud (ACC) or BIM 360.",
+                title="Not a Cloud Project",
+                warn_icon=True,
+                exitscript=True)
+
+if not hub_id or not proj_id:
+    forms.alert("Could not resolve the hub or project id for the current document.",
+                title="Project IDs Missing",
+                warn_icon=True,
+                exitscript=True)
+
+# Strip the two-character schema prefix (e.g. "b.") that GetHubId/GetProjectId return.
+hub_str = hub_id[2:]
+proj_str = proj_id[2:]
+acc_url = "https://acc.autodesk.com/insight/accounts/{}/projects/{}/home".format(hub_str, proj_str)
+
+webbrowser.open_new_tab(acc_url)
