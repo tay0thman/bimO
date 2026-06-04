@@ -1,120 +1,79 @@
-"""Select multiple sheets from a list"""
-#pylint: disable=import-error,invalid-name
+# -*- coding: utf-8 -*-
+# Author: Tay Othman
+"""Bulk-rename viewports on selected sheets to "<SheetNumber>-<DetailNumber> - <ViewName>".
 
-from Autodesk.Revit.DB import *
-from pyrevit import forms, revit, DB
-import csv
-__title__ = 'Detail Sorting'
-__author__  = 'Tay Othman, AIA'
+The office convention drops periods from sheet numbers (so "A1.01" → "A101")
+and strips any office-specific prefix tag (anything before a hyphen in the
+first 8 characters of the existing view name) — unless the prefix carries
+fire-rating language ("HOUR", "HR", "RATED"), in which case it's preserved.
 
-# Set the active Revit application and document
+A preview of every old → new name is shown for confirmation before any
+viewport is touched.
+"""
+from pyrevit import revit, DB, forms, script
+
+__title__ = "Detail\nNaming"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
+
 doc = revit.doc
 
-# Define Functions
-# Define a function to clean the string
-def clean_string(text):
-    if "-" in text[:5]:
-        fragment1 = text[:8]
-        if "-" in fragment1 and not any(x in fragment1 for x in ["HOUR", "HR", "RATED"]):
-            frag1new = fragment1.split("-")[-1]
-        else:
-            frag1new = fragment1
-        fragment2 = text[8:]
-        new_text = frag1new + fragment2
-    else:
-        new_text = text
-    return new_text
 
-# Define a function to Combine View number and View Name
-
-def combine_view_number_and_name(view_number, view_name, sheet_number):
-    view_number = str(view_number)  # remove leading zeros
-    return sheet_number + "-" + view_number + " - " + view_name
-
-    
-selection = revit.get_selection()
-sel_sheets = forms.select_sheets(title='Select Sheets')
-# sel_sheets = [sheet for sheet in forms.select_sheets(title='Select Sheets') if isinstance(sheet, ViewSheet)]
-
-if sel_sheets:
-    selection.set_to(sel_sheets)
-else: sys.exit()
-
-# Create a dictionary to store viewports on each sheet
-if sel_sheets:
-    viewport_dict = {}
-    for sheet in sel_sheets:
-        viewport_dict[sheet] = []
-
-    # Add viewports to the dictionary
-    for sheet in sel_sheets:
-        for viewport_id in sheet.GetAllViewports():
-            viewport = doc.GetElement(viewport_id)
-            #Extract Viewport Name
-            vnam = viewport.get_Parameter(BuiltInParameter.VIEWPORT_VIEW_NAME).AsString()
-            #Extract View Id
-            view_id = viewport.ViewId
-            rawshnum = sheet.get_Parameter(BuiltInParameter.SHEET_NUMBER).AsString()
-            shnum = rawshnum.replace(".", "")
-            #Extract Detail Number
-            vnum = viewport.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER).AsString()
-            #Extract Viewport Name remove any Risiduals from the previous name
-            newvnam = clean_string(vnam)
-            # print (shnum + "-" + vnum + " - " + vnam)
-            viewport_dict[sheet].append((view_id, shnum, vnum, vnam , newvnam))
+def _strip_office_prefix(view_name):
+    """Strip an office-specific prefix tag (everything up to the first '-' in the leading 8 chars), preserving fire-rating prefixes."""
+    if "-" not in view_name[:5]:
+        return view_name
+    head = view_name[:8]
+    if any(token in head for token in ("HOUR", "HR", "RATED")):
+        return view_name
+    if "-" in head:
+        return head.split("-")[-1] + view_name[8:]
+    return view_name
 
 
-
-# Define the file path and name for the CSV file
-#csv_file = r'C:\Users\TOthman\Desktop\test\pre_viewport_data.csv'
-
-# Open the CSV file for writing
-#with open(csv_file, 'wb') as file:
-#    writer = csv.writer(file)
-
-    # Write the header row
-#    writer.writerow(['ID', 'Sheet Number', 'Detail Number', 'VP Old Name', 'VP New Name'])
-
-    # Write the data rows
-#    for sheet, viewports in viewport_dict.items():
-#        for viewport in viewports:
-            # Write the data row
-#            writer.writerow([viewport[0], viewport[1], viewport[2], viewport[3], viewport[4]])
-            # evaluate and print the difference
-#           if viewport[3] != viewport[4]:
-#                print(viewport[3] + "       >>>>>>>>          " + viewport[4])
-
-# Create a list of old and new viewport names
-oldVPnames = []
-newVPnames = []
-for sheet, viewports in viewport_dict.items():
-    for viewport in viewports:
-        oldVPname = viewport[3]
-        oldVPnames.append(oldVPname)
-        newVPname = combine_view_number_and_name(viewport[2], viewport[4], viewport[1])
-        newVPnames.append(newVPname)
-
-# Create a list of changes
-changes = [old + "          >>>>>>>>            " + new for old, new in zip(oldVPnames, newVPnames)]
-
-# Display a confirmation dialog box
-proceed = forms.alert("List of changes:\n\n{}\n\nProceed?".format('\n'.join(changes)), ok=True, cancel=False, exitscript=False)
-if proceed:
-    # Push Changes to the Revit Sheets
-        for sheet, viewports in viewport_dict.items():
-            for viewport in viewports:
-                newVPname = combine_view_number_and_name(viewport[2], viewport[4], viewport[1])
-                # get the viewport element
-                view_id = viewport[0]
-                view = doc.GetElement(view_id)
-                # Set the VIEW_NAME and VIEW_DESCRIPTION properties
-                with Transaction(doc, 'Set View Properties') as tx:
-                    tx.Start()
-                    view.get_Parameter(BuiltInParameter.VIEW_NAME).Set(newVPname)
-                    view.get_Parameter(BuiltInParameter.VIEW_DESCRIPTION).Set(viewport[4])
-                    tx.Commit()
+def _compose_name(sheet_number, detail_number, clean_view_name):
+    return "{}-{} - {}".format(sheet_number, detail_number, clean_view_name)
 
 
-            forms.show_balloon("Done Renaming All The Viewports of This Sheet", "Done Renaming All The Viewports of This Sheet", "information")
-else:
-    forms.alert("Operation Cancelled", title="Viewport Renaming")
+sheets = forms.select_sheets(title="Select Sheets to Re-name Viewports")
+if not sheets:
+    script.exit()
+
+renames = []  # list of (view_element, old_name, new_name, clean_view_name)
+for sheet in sheets:
+    sheet_number_compact = sheet.SheetNumber.replace(".", "")
+    for viewport_id in sheet.GetAllViewports():
+        viewport = doc.GetElement(viewport_id)
+        view = doc.GetElement(viewport.ViewId)
+        old_name = viewport.get_Parameter(DB.BuiltInParameter.VIEWPORT_VIEW_NAME).AsString() or ""
+        detail_number = viewport.get_Parameter(DB.BuiltInParameter.VIEWPORT_DETAIL_NUMBER).AsString() or ""
+        clean_name = _strip_office_prefix(old_name)
+        new_name = _compose_name(sheet_number_compact, detail_number, clean_name)
+        renames.append((view, old_name, new_name, clean_name))
+
+if not renames:
+    forms.alert("No viewports found on the selected sheets.",
+                title="Nothing To Rename",
+                exitscript=True)
+
+preview = "\n".join("{:<40} >>> {}".format(old, new) for _, old, new, _ in renames)
+proceed = forms.alert(
+    "Preview ({} viewports):\n\n{}\n\nProceed?".format(len(renames), preview),
+    title="Detail Naming Preview",
+    ok=True, cancel=True,
+)
+if not proceed:
+    script.exit()
+
+with revit.Transaction("Detail Naming"):
+    for view, _, new_name, clean_name in renames:
+        view_name_param = view.get_Parameter(DB.BuiltInParameter.VIEW_NAME)
+        view_desc_param = view.get_Parameter(DB.BuiltInParameter.VIEW_DESCRIPTION)
+        if view_name_param and not view_name_param.IsReadOnly:
+            view_name_param.Set(new_name)
+        if view_desc_param and not view_desc_param.IsReadOnly:
+            view_desc_param.Set(clean_name)
+
+forms.toast("Renamed {} viewport(s)".format(len(renames)),
+            title="Detail Naming")

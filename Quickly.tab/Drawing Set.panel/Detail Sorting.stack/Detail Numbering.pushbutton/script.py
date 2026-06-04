@@ -1,80 +1,87 @@
-"""Select multiple sheets from a list"""
-#pylint: disable=import-error,invalid-name
-import os
-import getpass
+# -*- coding: utf-8 -*-
+# Author: Tay Othman
+"""Auto-number every viewport on the active sheet based on its position.
+
+The active view must be a sheet. Viewports are mapped to a 5-column × 4-row
+grid tuned to a 30"×42" landscape titleblock; cells are numbered 1..20
+left-to-right within each row, top-to-bottom.
+
+Two passes:
+1. Stamp every viewport with a unique "Xx<n>" placeholder so subsequent
+   real numbers don't collide with currently-assigned ones.
+2. Assign the position-based number to each viewport.
+"""
 import random
 
-import clr
-from Autodesk.Revit.DB import *
-from Autodesk.Revit.UI import *
-from pyrevit import forms, revit
-doc = __revit__.ActiveUIDocument.Document
-clr.AddReference('RevitAPI')
-from Autodesk.Revit.DB import FilteredElementCollector, Viewport, XYZ, TextNoteType
+from pyrevit import revit, DB, forms, script
 
-__title__ = 'Detail Numbering'
-__author__  = 'Tay Othman, AIA'
+__title__ = "Detail\nNumbering"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
 
-# Get the active view
-active_view = __revit__.ActiveUIDocument.ActiveView
+# 5 columns × 4 rows, tuned for a 30"x42" landscape sheet.
+X_DOMAINS = [(2.5, 3.1), (1.91, 2.5), (1.32, 1.91), (0.731, 1.32), (0, 0.731)]
+Y_DOMAINS = [(1.85, 2.5), (1.25, 1.85), (0.656, 1.25), (0, 0.731)]
 
-# Get all viewports in the active view
-viewports = FilteredElementCollector(active_view.Document, active_view.Id).OfClass(Viewport).ToElements()
+doc = revit.doc
+active_view = revit.active_view
 
-# Print the list of viewports and their center coordinates
-import math
+if not isinstance(active_view, DB.ViewSheet):
+    forms.alert("Activate a sheet view first — this tool numbers viewports placed on the active sheet.",
+                title="Not a Sheet",
+                exitscript=True)
 
-#Tempoarly number the viewports to be X+autoincrement
-for i, viewport in enumerate(viewports):
-    view_id = viewport.ViewId
-    view = doc.GetElement(view_id)
-    ranindex = random.randint(1, 1000)
-    # Set the VIEW_NAME and VIEW_DESCRIPTION properties
-    with Transaction(doc, 'Set View Properties') as tx:
-         tx.Start()
-         xn = "Xx" + str(ranindex)
-         view.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER).Set(xn)
-         tx.Commit()
-    
+viewports = list(DB.FilteredElementCollector(doc, active_view.Id).OfClass(DB.Viewport))
+if not viewports:
+    forms.alert("The active sheet has no viewports.",
+                title="No Viewports",
+                exitscript=True)
 
-# Create a list of the sheet domains (30" x 42")
-xdomains = [(2.5, 3.1), (1.91, 2.5), (1.32, 1.91), (0.731, 1.32), (0, 0.731)]
-ydomains = [(1.85, 2.5), (1.25, 1.85), (0.656, 1.25), (0, 0.731)]
-    
-# Create a list of 2D domains
-domains_2d = []
-for i in range(len(xdomains)):
-      for j in range(len(ydomains)):
-        domain = ((xdomains[i][0], xdomains[i][1]), (ydomains[j][0], ydomains[j][1]))
-        domains_2d.append(domain)
+cells = []  # ordered (left-to-right within each row, top-to-bottom)
+for x_lo, x_hi in X_DOMAINS:
+    for y_lo, y_hi in Y_DOMAINS:
+        cells.append(((x_lo, x_hi), (y_lo, y_hi)))
 
-# Get all viewports in the active view
-viewports = FilteredElementCollector(active_view.Document, active_view.Id).OfClass(Viewport).ToElements()
-# Change the VIEWPORT_DETAIL_NUMBER parameter of the viewports to match domains_2d based on their center coordinates
-for i, viewport in enumerate(viewports):
-    view_id = viewport.ViewId
-    view = doc.GetElement(view_id)
-    # Get the center coordinates of the viewport
+
+def _cell_index_for(viewport):
     center = viewport.GetBoxCenter()
-    outline = viewport.GetBoxOutline()
-    lower_left = outline.MinimumPoint
-    # Find the mid point between the lower left and the center of the viewport
-    mid_point = XYZ((lower_left.X + center.X) / 2, (lower_left.Y + center.Y) / 2, 0)
-    # Find a point between the lower left and the center of the viewport that is 1/4 of the distance from the lower left
-    # This point will be used to determine the viewport's domain
-    quarter_point = XYZ((lower_left.X + mid_point.X) / 2, (lower_left.Y + mid_point.Y) / 2, 0)
+    lower_left = viewport.GetBoxOutline().MinimumPoint
+    mid = DB.XYZ((lower_left.X + center.X) / 2.0, (lower_left.Y + center.Y) / 2.0, 0)
+    quarter = DB.XYZ((lower_left.X + mid.X) / 2.0, (lower_left.Y + mid.Y) / 2.0, 0)
+    for k, ((x_lo, x_hi), (y_lo, y_hi)) in enumerate(cells):
+        if x_lo <= quarter.X <= x_hi and y_lo <= quarter.Y <= y_hi:
+            return k + 1
+    return None
 
-    # Find the corresponding domains_2d index that corresponds to the viewport's center
-    for k, domain in enumerate(domains_2d):
-        if quarter_point.X >= domain[0][0] and quarter_point.X <= domain[0][1] and quarter_point.Y >= domain[1][0] and quarter_point.Y <= domain[1][1]:
-            detnum = str(k+1)
-            print(detnum + " - " + view.Name)
-            # Set the VIEWPORT_DETAIL_NUMBER parameter to the viewport
-            with Transaction(doc, 'Set View Properties') as tx:
-                tx.Start()
-                view.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER).Set(detnum)
-                tx.Commit()
-            break
 
-# Display a confirmation dialog box showing "Done Renaming All The Viewports of This Sheet"
-forms.show_balloon("Done Renaming All The Viewports of This Sheet", "Done Renaming All The Viewports of This Sheet", "information")
+# Pass 1 — stamp every viewport with a unique placeholder to break duplicate-number conflicts.
+with revit.Transaction("Detail Numbering — placeholder pass"):
+    for viewport in viewports:
+        view = doc.GetElement(viewport.ViewId)
+        placeholder = "Xx{}".format(random.randint(1, 99999))
+        param = view.get_Parameter(DB.BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
+        if param and not param.IsReadOnly:
+            param.Set(placeholder)
+
+# Pass 2 — assign the final position-based number.
+numbered = 0
+unplaced = []
+with revit.Transaction("Detail Numbering"):
+    for viewport in viewports:
+        view = doc.GetElement(viewport.ViewId)
+        index = _cell_index_for(viewport)
+        if index is None:
+            unplaced.append(view.Name)
+            continue
+        param = view.get_Parameter(DB.BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
+        if param and not param.IsReadOnly:
+            param.Set(str(index))
+            numbered += 1
+        print("{:>3} — {}".format(index, view.Name))
+
+forms.toast("Numbered {} viewport(s)".format(numbered), title="Detail Numbering")
+if unplaced:
+    print("\nViewports that fell outside the 5×4 grid (left as placeholder):")
+    for name in unplaced:
+        print("  - {}".format(name))

@@ -1,0 +1,6 @@
+title:
+  en_us: "Detail\nNumbering"
+tooltip:
+  en_us: |
+    Auto-number the viewports on the active sheet based on their position. Viewports are sorted left-to-right within rows (top-to-bottom), keyed to a 5×4 grid tuned for a 30"×42" landscape titleblock.
+context: doc-required

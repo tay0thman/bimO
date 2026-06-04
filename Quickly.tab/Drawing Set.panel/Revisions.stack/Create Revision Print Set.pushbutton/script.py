@@ -1,35 +1,43 @@
-#pylint: disable=E0401,C0103,C0111
-from pyrevit import revit
-from pyrevit import forms
-import os
+# -*- coding: utf-8 -*-
+# Author: Tay Othman
+"""Build a print sheet set from one or more selected revisions.
 
-__author__ = 'Tay Othman, AIA'
+When multiple revisions are picked, the user is asked whether sheets must
+carry ANY or ALL of those revisions to be included.
 
-revisionsPrintSet = forms.select_revisions(button_name='Create Sheet Set',
+After the set is created, empty sheets (no model content) are reported so
+the user can verify nothing was placeholder-only.
+"""
+# pylint: disable=import-error,invalid-name
+from pyrevit import revit, forms, script
+
+__title__ = "Create Revision\nPrint Set"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
+
+revisions = forms.select_revisions(button_name="Create Sheet Set",
                                    multiple=True)
-if revisionsPrintSet:
-    if len(revisionsPrintSet) > 1:
-        selected_switch = \
-            forms.CommandSwitchWindow.show(['Matching ANY revision',
-                                            'Matching ALL revisions'],
-                                           message='Pick an option:')
-    else:
-        selected_switch = 'Matching ALL revisions'
+if not revisions:
+    script.exit()
 
-    if selected_switch:
-        match_any = (selected_switch == 'Matching ANY revision')
-        with revit.Transaction('Create Revision Sheet Set'):
-            rev_sheetset = \
-                revit.create.create_revision_sheetset(revisionsPrintSet,
+if len(revisions) > 1:
+    mode = forms.CommandSwitchWindow.show(
+        ["Matching ANY revision", "Matching ALL revisions"],
+        message="Which sheets should the set include?",
+    )
+    if not mode:
+        script.exit()
+    match_any = mode == "Matching ANY revision"
+else:
+    match_any = False  # only one revision picked; ANY vs ALL is moot
+
+with revit.Transaction("Create Revision Sheet Set"):
+    sheet_set = revit.create.create_revision_sheetset(revisions,
                                                       match_any=match_any)
 
-        empty_sheets = []
-        for sheet in rev_sheetset:
-            if revit.query.is_sheet_empty(sheet):
-                empty_sheets.append(sheet)
-
-        if empty_sheets:
-            print('These sheets do not have any model contents and seem to be '
-                  'placeholders for other content:')
-            for esheet in empty_sheets:
-                revit.report.print_sheet(esheet)
+empty_sheets = [s for s in sheet_set if revit.query.is_sheet_empty(s)]
+if empty_sheets:
+    print("\nThese sheets are empty (no model content) — likely placeholders:")
+    for s in empty_sheets:
+        revit.report.print_sheet(s)

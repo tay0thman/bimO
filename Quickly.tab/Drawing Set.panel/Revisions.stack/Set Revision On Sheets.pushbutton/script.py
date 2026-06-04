@@ -1,34 +1,41 @@
-"""Set selected revisions on selected sheets."""
-#updated by Tay Othman 2023-11-25
+# -*- coding: utf-8 -*-
+# Author: Tay Othman
+"""Set selected revisions on selected sheets as additional revisions.
 
-from pyrevit import revit, DB
-from pyrevit import forms
-import os
+Issued revisions are filtered out of the revision picker — only unissued
+revisions can be added to a sheet.
+"""
+from pyrevit import revit, DB, forms, script
+
+__title__ = "Set Revision\nOn Sheets"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
 
 
-# define a filterfunc to filter out issued revisions
-def filterfunc(rev):
-    return rev.Issued == False
+def _is_unissued(rev):
+    return not rev.Issued
 
-revisions = forms.select_revisions(button_name='Select Revision',
+
+revisions = forms.select_revisions(button_name="Select Revisions",
                                    multiple=True,
-                                   filterfunc=filterfunc)
+                                   filterfunc=_is_unissued)
+if not revisions:
+    script.exit()
 
+sheets = forms.select_sheets(button_name="Set Revision On These Sheets",
+                             include_placeholder=True)
+if not sheets:
+    script.exit()
 
+with revit.Transaction("Set Revision On Sheets"):
+    updated_sheets = revit.update.update_sheet_revisions(revisions, sheets)
 
-if revisions:
-    sheets = forms.select_sheets(button_name='Set Revision',
-                                 include_placeholder=True)
-    if sheets:
-        with revit.Transaction('Set Revision on Sheets'):
-            updated_sheets = revit.update.update_sheet_revisions(revisions,
-                                                                 sheets)
-        if updated_sheets:
-            print('SELECTED REVISION ADDED TO THESE SHEETS:')
-            print('-' * 100)
-            for s in updated_sheets:
-                snum = s.Parameter[DB.BuiltInParameter.SHEET_NUMBER]\
-                        .AsString().rjust(10)
-                sname = s.Parameter[DB.BuiltInParameter.SHEET_NAME]\
-                         .AsString().ljust(50)
-                print('NUMBER: {0}   NAME:{1}'.format(snum, sname))
+output = script.get_output()
+output.print_md("# Revisions Added")
+output.print_md("**Sheets updated: {}**".format(len(updated_sheets) if updated_sheets else 0))
+if updated_sheets:
+    for s in updated_sheets:
+        number = s.SheetNumber
+        name = s.Name
+        output.print_md("- `{}` — {}".format(number, name))

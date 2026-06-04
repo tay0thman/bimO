@@ -1,0 +1,6 @@
+title:
+  en_us: "Detail\nNaming"
+tooltip:
+  en_us: |
+    Bulk-rename the viewports on selected sheets to follow the office convention "<SheetNumber>-<DetailNumber> - <ViewName>". Shows a side-by-side preview of every old → new name before committing.
+context: doc-required

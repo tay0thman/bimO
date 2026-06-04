@@ -1,59 +1,57 @@
-"""Update Index with Revised Sheets"""
-#updated by Tay Othman 2023-11-25
+# -*- coding: utf-8 -*-
+# Author: Tay Othman
+"""For every sheet carrying a selected revision, set a chosen sheet text parameter to "X".
 
-from pyrevit import revit, DB
-from pyrevit import forms
-import os
-import sys
+Useful for stamping the per-issue column on a project's sheet-index sheet.
+The parameter picker filters to sheet text parameters whose name contains
+"/" — the office convention for issue-date column headers like "11/25/25".
+"""
+from pyrevit import revit, DB, forms, script
 
-author = 'Tay Othman, AIA'
-
-# Filter Function
-param_filter_func = lambda p: '/' in p.name 
-
-revisionsID = None
-# Collect Revions in the Project
-try: revisionsID = forms.select_revisions(button_name='Select Revised Sheets',
-                                   multiple=False)
-except: # if the user cancels the selection
-    sys.exit()
+__title__ = "Push Revisions\nto Index"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
 
 
+def _param_filter(p):
+    return "/" in p.name
 
 
-# Query all sheets in the project that contains RevisionID or a clouded revision
+revision = forms.select_revisions(button_name="Select Revision",
+                                  multiple=False)
+if not revision:
+    script.exit()
 
-sheets = DB.FilteredElementCollector(revit.doc)\
-            .OfCategory(DB.BuiltInCategory.OST_Sheets)\
-            .WhereElementIsNotElementType()\
-            .ToElements()
+sheets = list(DB.FilteredElementCollector(revit.doc)
+              .OfCategory(DB.BuiltInCategory.OST_Sheets)
+              .WhereElementIsNotElementType())
+sheets_to_modify = [s for s in sheets
+                    if s.GetAllRevisionIds().Contains(revision.Id)]
+if not sheets_to_modify:
+    forms.alert("No sheets carry the selected revision.",
+                title="Nothing To Update",
+                exitscript=True)
 
-# Filter sheets that contains the selected revision
+target_params = forms.select_parameters(
+    sheets_to_modify[0],
+    title="Select Index Column to Mark",
+    filterfunc=_param_filter,
+    button_name="Mark With X",
+    exclude_readonly=True,
+)
+if not target_params:
+    script.exit()
+target_param_name = target_params[0].name
 
-sheetsToModify = []
-if revisionsID == None:
-    sys.exit()
-else:
-    print(revisionsID.Name)
-for sheet in sheets:
-    sheetrevs = sheet.GetAllRevisionIds()
-    if sheetrevs.Contains(revisionsID.Id):
-        sheetsToModify.append(sheet)
+with revit.Transaction("Push Revisions To Index"):
+    for sheet in sheets_to_modify:
+        param = sheet.LookupParameter(target_param_name)
+        if param and not param.IsReadOnly:
+            param.Set("X")
 
-# Parameter Work
-sh_Params = []
-sheetTextParams = []
-
-# Define Filtering Pattern to be '/' to get all the parameters
-TargetParam = forms.select_parameters(sheetsToModify[0], title='Select Parameter to Update', filterfunc=param_filter_func,  button_name='Select Parameter', exclude_readonly=True)
-
-# Start Revit Transaction and Loop through SheetsToModify and Update the Value of TargetParam to be 'X'
-with revit.Transaction('Add Revised Sheets to Index'):
-    for sheet in sheetsToModify:
-        sheet.LookupParameter(TargetParam[0].name).Set('X')
-
-# Report the number of sheets that has been updated
-print('Number of Sheets Updated: {}'.format(len(sheetsToModify)))
-print('_______________________________________List of Sheets Updated:')
-for sheet in sheetsToModify:
-            print("Sheet: " + sheet.SheetNumber + " - " + sheet.Name)
+output = script.get_output()
+output.print_md("# Pushed `{}` Revision to Index".format(revision.Name))
+output.print_md("**Set `{}` = 'X' on {} sheet(s):**".format(target_param_name, len(sheets_to_modify)))
+for s in sheets_to_modify:
+    output.print_md("- `{}` — {}".format(s.SheetNumber, s.Name))

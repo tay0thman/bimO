@@ -1,0 +1,6 @@
+title:
+  en_us: "Push Revisions\nto Index"
+tooltip:
+  en_us: |
+    For every sheet carrying a selected revision, set a chosen sheet text parameter (filter shows parameters whose name contains "/") to "X" — handy for marking the issue column on a project's sheet index.
+context: doc-required

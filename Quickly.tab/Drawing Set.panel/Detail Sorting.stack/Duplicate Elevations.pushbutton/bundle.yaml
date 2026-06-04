@@ -1,0 +1,6 @@
+title:
+  en_us: "Duplicate\nElevations"
+tooltip:
+  en_us: |
+    Duplicate selected elevation views with a user-supplied prefix and apply a chosen elevation view template to the copies. Useful for spinning up enlarged-elevations or UG enlargement sets in one pass.
+context: doc-required
