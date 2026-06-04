@@ -1,0 +1,5 @@
+title:
+  en_us: Flip Grids
+tooltip:
+  en_us: Toggle grid-bubble visibility at each end of every selected grid in the active view. Bubbles that were hidden become visible; visible ones become hidden — per end, independently.
+context: selection

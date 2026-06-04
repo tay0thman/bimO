@@ -1,44 +1,33 @@
-"""Select Multiple Grids and turn off the bubble visibility on one side and turn on the bubble visibility on the other side"""
-#pylint: disable=import-error,invalid-name
-__title__ = 'Flip Grids'
-__author__  = 'Tay Othman, AIA'
+# -*- coding: utf-8 -*-
+# Author: Tay Othman
+"""Toggle grid-bubble visibility at each end of every selected grid in the active view.
 
-from Autodesk.Revit.DB import *
-from pyrevit import forms, revit, DB
-import os
-import getpass
-from datetime import datetime
-import os
-import sys
+For each selected grid, bubbles that are currently visible at an end are hidden,
+and bubbles that are currently hidden are shown — independently per end. Combined
+with selecting a row of grids, this is the fastest way to "flip" bubbles from one
+side of a plan to the other.
+"""
+from pyrevit import revit, DB, forms
 
-# Set the active Revit application and document
+__title__ = "Flip Grids"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
+
 doc = revit.doc
 active_view = doc.ActiveView
-# Select multiple objects
-objects = revit.get_selection()
-# filter the grids of the selection
-grids = [obj for obj in objects if isinstance(obj, DB.Grid)]
 
-# Check if grids are selected
+grids = [obj for obj in revit.get_selection() if isinstance(obj, DB.Grid)]
 if not grids:
-    forms.alert('No Grids selected!', exitscript=True)
-end_0 = []
-end_1 = []
-# Enumerate through the selected grids
-with revit.Transaction('Flip Grids'):
+    forms.alert("Select one or more grids first, then run this tool.",
+                title="No Grids Selected",
+                warn_icon=True,
+                exitscript=True)
+
+with revit.Transaction("Flip Grids"):
     for grid in grids:
-        # Define Ends
-        end_0 = grid.IsBubbleVisibleInView(DB.DatumEnds.End0, active_view)
-        end_1 = grid.IsBubbleVisibleInView(DB.DatumEnds.End1, active_view)
-
-        if end_0:
-            grid.HideBubbleInView(DB.DatumEnds.End0, active_view)
-        else:
-            grid.ShowBubbleInView(DB.DatumEnds.End0, active_view)
-
-        if end_1:
-            grid.HideBubbleInView(DB.DatumEnds.End1, active_view)
-        else:
-            grid.ShowBubbleInView(DB.DatumEnds.End1, active_view)
-
-
+        for end in (DB.DatumEnds.End0, DB.DatumEnds.End1):
+            if grid.IsBubbleVisibleInView(end, active_view):
+                grid.HideBubbleInView(end, active_view)
+            else:
+                grid.ShowBubbleInView(end, active_view)
