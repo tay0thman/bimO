@@ -1,103 +1,96 @@
-"""Rename Views by Room Number"""
-#pylint: disable=import-error,invalid-name
-from pydoc import doc
-from pyrevit import forms, revit, DB, script
+# -*- coding: utf-8 -*-
+# Author: Tay Othman
+"""Renumber view names and view titles to track renumbered rooms.
 
-__title__ = 'Rename Views by Room'
-__author__  = 'Tay Othman, AIA'
+Workflow when a project's room numbers change:
+1. Before renumbering, store each room's existing number in a project-wide
+   shared parameter named `Room Numbers - Old` on the room.
+2. Renumber the rooms in Revit as normal (changing each room's `Number`).
+3. Run this tool — every view whose name or title contains an old number
+   gets that number replaced with the room's current `Number`.
+
+A "number" here is any 3-digit token in the view name or view title.
+"""
+from pyrevit import revit, DB, forms, script
+
+__title__ = "Find/Replace\nRoom #"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
+
+OLD_ROOM_PARAM = "Room Numbers - Old"
 
 doc = revit.doc
 
-oldroomparameter = "Room Numbers - Old"
-newroomparameter = "Room Numbers - New"
 
-# Define a function to collect all views in the document
-def collect_views(doc):
-    return DB.FilteredElementCollector(doc) \
-           .OfCategory(DB.BuiltInCategory.OST_Views) \
-           .WhereElementIsNotElementType() \
-           .ToElements()
-
-# Define a function to look for a three digit number in view names
-def find_number(text):
+def _find_three_digit_token(text):
+    """Return the first 3-digit whitespace-separated token in text, or None."""
+    if not text:
+        return None
     for word in text.split():
         if word.isdigit() and len(word) == 3:
             return word
-    return
-# Define a function to test a string for a three digit number between 000 and 999
-def is_three_digit_number(text):
-    for word in text.split():
-        if word.isdigit() and 0 <= int(word) <= 999:
-            return True
-    return False
-# Define a function to get all room numbers
-def get_room_numbers():
-    all_rooms = DB.FilteredElementCollector(doc).OfClass(DB.SpatialElement).ToElements()
-    new_room_numbers = []
-    for room in all_rooms:
-        if room.Number:
-            new_room_number = room.Number
-            new_room_numbers.append(new_room_number)
-    return new_room_numbers
-# Define a function to get all old room numbers
-def get_old_room_numbers():
-    all_rooms = DB.FilteredElementCollector(doc).OfClass(DB.SpatialElement).ToElements()
-    old_room_numbers = []
-    for room in all_rooms:
-        if room.LookupParameter(oldroomparameter):
-            old_room_number = room.LookupParameter(oldroomparameter).AsString()
-            old_room_numbers.append(old_room_number)
-    return old_room_numbers
-
-# define a function to look through all views names and titles on sheets
-def rename_views_by_room():
-    # current document views
-    curdoc_views = collect_views(revit.doc)
-    curdoc_views_dict = {revit.query.get_name(v): v for v in curdoc_views}
-    # Get all rooms in the project
-    all_rooms = DB.FilteredElementCollector(doc).OfClass(DB.SpatialElement).ToElements()
-    # sort the rooms by number
-    all_rooms = sorted(all_rooms, key=lambda x: x.Number)
-    # Look for the values of revit.local.shared paramter "Room Numbers - Old" for each room
-    old_room_numbers = get_old_room_numbers()
-    # Look for the values of room.Number for each room
-    new_room_numbers = get_room_numbers()
-    #loop through all views and find names that contain a three digit number matches old room number
-    all_views = collect_views(doc)
-    for room in all_rooms:
-        print('Processing room number: {}'.format(room.Number))
-        if room.Number:
-            for view in all_views:
-                viewnameparam = view.Parameter[DB.BuiltInParameter.VIEW_NAME]
-                viewname = revit.query.get_name(view)
-                viewtitleparam = view.Parameter[DB.BuiltInParameter.VIEW_DESCRIPTION]
-                viewtitle = revit.query.get_param_value(viewtitleparam)
-                # determine if there is a value in the viewtitle
-                if viewtitle:
-                    # if the viewtitle contains the old room number
-                    if find_number(viewtitle) == room.LookupParameter(oldroomparameter).AsString():
-                        # replace the old room number with the new room number
-                        new_view_title = viewtitle.replace(find_number(viewtitle), room.Number)
-                        # set the new view title
-                        viewtitleparam.Set(new_view_title)
-                        print('Renamed view: {} to {}'.format(viewtitle, new_view_title))
-                else:
-                    # if the viewname contains the old room number
-                    if find_number(viewname):
-                        if find_number(viewname) == room.LookupParameter(oldroomparameter).AsString():
-                            # replace the old room number with the new room number
-                            new_view_name = viewname.replace(find_number(viewname), room.Number)
-                            # set the new view name
-                            viewnameparam.Set(new_view_name)
-                            print('Renamed view: {} to {}'.format(viewname, new_view_name))
+    return None
 
 
-                    
+def _collect_views(active_doc):
+    return (DB.FilteredElementCollector(active_doc)
+            .OfCategory(DB.BuiltInCategory.OST_Views)
+            .WhereElementIsNotElementType()
+            .ToElements())
 
-#call the function
-if __name__ == '__main__':
-    with revit.Transaction('Rename Views by Room'):
-        rename_views_by_room()
-    print('Views renamed successfully')
 
-# rename_views_by_room()
+rooms = (DB.FilteredElementCollector(doc)
+         .OfClass(DB.SpatialElement)
+         .ToElements())
+rooms = [r for r in rooms if isinstance(r, DB.Architecture.Room) and r.Number]
+
+if not rooms:
+    forms.alert("No rooms found in the project.", title="No Rooms", exitscript=True)
+
+# Build old-number → new-number map from the shared parameter on each room.
+renumbers = {}
+for room in rooms:
+    old_param = room.LookupParameter(OLD_ROOM_PARAM)
+    if not old_param:
+        continue
+    old_number = old_param.AsString()
+    if old_number and old_number != room.Number:
+        renumbers[old_number] = room.Number
+
+if not renumbers:
+    forms.alert("No `{}` values found on any room, or no rooms were renumbered.\n\n"
+                "Add a project shared parameter named `{}` to rooms and populate it "
+                "with each room's previous number before running this tool."
+                .format(OLD_ROOM_PARAM, OLD_ROOM_PARAM),
+                title="Nothing To Do",
+                exitscript=True)
+
+views = _collect_views(doc)
+renamed_count = 0
+
+with revit.Transaction("Find / Replace Room # in View Names"):
+    for view in views:
+        title_param = view.get_Parameter(DB.BuiltInParameter.VIEW_DESCRIPTION)
+        view_title = title_param.AsString() if title_param else None
+
+        if view_title:
+            token = _find_three_digit_token(view_title)
+            if token and token in renumbers:
+                new_title = view_title.replace(token, renumbers[token])
+                title_param.Set(new_title)
+                print("Title: '{}' → '{}'".format(view_title, new_title))
+                renamed_count += 1
+                continue
+
+        view_name = revit.query.get_name(view)
+        token = _find_three_digit_token(view_name)
+        if token and token in renumbers:
+            name_param = view.get_Parameter(DB.BuiltInParameter.VIEW_NAME)
+            if name_param and not name_param.IsReadOnly:
+                new_name = view_name.replace(token, renumbers[token])
+                name_param.Set(new_name)
+                print("Name:  '{}' → '{}'".format(view_name, new_name))
+                renamed_count += 1
+
+print("\nDone. Renamed {} view(s).".format(renamed_count))

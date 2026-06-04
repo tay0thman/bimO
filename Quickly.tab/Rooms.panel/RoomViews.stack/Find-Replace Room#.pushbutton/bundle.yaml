@@ -1,0 +1,6 @@
+title:
+  en_us: "Find/Replace\nRoom #"
+tooltip:
+  en_us: |
+    Renumber views and view titles to follow renumbered rooms.
+    Requires a project shared parameter named "Room Numbers - Old" on each room, holding the room's previous (pre-renumber) number. For every view whose name or title contains an old room number, that number is replaced with the room's current `Number`.

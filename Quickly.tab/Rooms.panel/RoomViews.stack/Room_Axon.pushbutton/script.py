@@ -1,182 +1,141 @@
-# this script prompts the user to pick a room and then creates an axonometric view of the room
-# the view is created by creating a 3D view and setting the view orientation to axonometric
-# the view is then zoomed to the room and the view is named after the room
+# -*- coding: utf-8 -*-
+# Author: Tay Othman
+"""Create an isometric 3D view for each selected room.
 
-# import the Revit API
-import clr
-clr.AddReference('RevitAPI')
-clr.AddReference('RevitAPIUI')
+For every room you pick, this tool creates a new isometric View3D whose section
+box is sized to that room's 3D bounding box. Each view is set to 1/4"=1'-0",
+Architectural discipline, and gets the chosen 3D view template applied.
 
-from Autodesk.Revit.DB import *
-from Autodesk.Revit.UI import *
-#import pyRevit
-import pyrevit
-from pyrevit import DB, UI, revit, HOST_APP
-from pyrevit import script, forms, coreutils
+Views named `ROOM AXON _ <Number> - <Name>` that already exist are replaced.
+"""
+from pyrevit import revit, DB, forms, script
 
+__title__ = "Room Axon"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
 
+VIEW_NAME_PREFIX = "ROOM AXON _ "
+VIEW_SCALE = 48  # 1/4" = 1'-0"
 
-
-__title__ = 'Room Axon'
-__author__ = 'Tay Othman'
-# get the active document
-doc = __revit__.ActiveUIDocument.Document
-activeview = doc.ActiveView
-
-levelnames = []
-# Get all the levels in the model
-levels = DB.FilteredElementCollector(revit.doc).OfCategory(DB.BuiltInCategory.OST_Levels).WhereElementIsNotElementType().ToElements()
+doc = revit.doc
+uidoc = revit.uidoc
 
 
-# get the level names
-levelnames = []
-for level in levels:
-    levelnames.append(level.Name)
+def _room_label(room):
+    number = room.get_Parameter(DB.BuiltInParameter.ROOM_NUMBER).AsString() or ""
+    name = room.get_Parameter(DB.BuiltInParameter.ROOM_NAME).AsString() or ""
+    return "{} - {}".format(number, name)
 
-# prompt the user to select a level
-selectedlevel = forms.SelectFromList.show(levelnames, button_name='Select Level', multiselect=False, title='Select Level', message='Select a level to filter rooms')
-if selectedlevel == None:
+
+def _view_name_for(room):
+    return VIEW_NAME_PREFIX + _room_label(room)
+
+
+levels = (DB.FilteredElementCollector(doc)
+          .OfCategory(DB.BuiltInCategory.OST_Levels)
+          .WhereElementIsNotElementType()
+          .ToElements())
+level_by_name = {lvl.Name: lvl for lvl in levels}
+level_name = forms.SelectFromList.show(
+    sorted(level_by_name.keys()),
+    title="Select Level",
+    button_name="Pick Level",
+)
+if not level_name:
     script.exit()
-# get the index of the selectedlevel in the levelnames list
-selectedlevelindex = levelnames.index(selectedlevel)
+selected_level = level_by_name[level_name]
 
-# get the level object from the levels list
-selectedlevel = levels[selectedlevelindex]
+all_rooms = (DB.FilteredElementCollector(doc)
+             .OfCategory(DB.BuiltInCategory.OST_Rooms)
+             .WhereElementIsNotElementType()
+             .ToElements())
+rooms_on_level = [r for r in all_rooms
+                  if r.LevelId == selected_level.Id and r.Area > 0]
+if not rooms_on_level:
+    forms.alert("No placed rooms found on level '{}'.".format(level_name),
+                title="No Rooms",
+                exitscript=True)
+rooms_on_level.sort(key=lambda r: r.Number or "")
 
-# get all rooms in the model
-rooms = DB.FilteredElementCollector(revit.doc).OfCategory(DB.BuiltInCategory.OST_Rooms).ToElements()
-# get all the bounding boxes of the rooms
-for room in rooms:
-    try:
-        bb = room.get_BoundingBox(revit.doc.ActiveView)
-        #print the volume of the bounding box
-        
-    except:
-        print("Room <" + room.get_Parameter(DB.BuiltInParameter.ROOM_NUMBER).AsString() + " - " + room.get_Parameter(DB.BuiltInParameter.ROOM_NAME).AsString() + "> has no bounding box")
-        # filter out the room from the list
-        rooms = [r for r in rooms if r != room]
-        pass
-#filter all the rooms on the selected level
-rooms = [room for room in rooms if room.Level.Name == selectedlevel.Name]
-
-#get list of room names
-roomnames = []
-roomnumbers = []
-roomnamesandnumbers = []
-for room in rooms:
-    roomnames.append(room.get_Parameter(DB.BuiltInParameter.ROOM_NAME).AsString())
-    roomnumbers.append(room.get_Parameter(DB.BuiltInParameter.ROOM_NUMBER).AsString())
-    roomnamesandnumbers.append(room.get_Parameter(DB.BuiltInParameter.ROOM_NUMBER).AsString() + " - " + room.get_Parameter(DB.BuiltInParameter.ROOM_NAME).AsString())
-
-# sort the roomnames list by room number
-roomnamesandnumbers = [x for _, x in sorted(zip(roomnumbers, roomnamesandnumbers))]
-rooms = [x for _, x in sorted(zip(roomnumbers, rooms))]
-roomnumbers.sort()
-
-
-# prompt the user to select a room
-selectedroom = forms.SelectFromList.show(roomnamesandnumbers, button_name='Select Room', multiselect=True, title='Select Rooms', message='Select a room to create an axonometric view')
-
-if selectedroom == None:
+room_by_label = {_room_label(r): r for r in rooms_on_level}
+ordered_labels = [_room_label(r) for r in rooms_on_level]
+selected_labels = forms.SelectFromList.show(
+    ordered_labels,
+    title="Select Rooms",
+    button_name="Create Axon Views",
+    multiselect=True,
+)
+if not selected_labels:
     script.exit()
+selected_rooms = [room_by_label[label] for label in selected_labels]
 
-# get the index of the selectedroom in the roomnames list
-roomindex = []
-for room in selectedroom:
-    selectedroomindex = roomnamesandnumbers.index(room)
-    roomindex.append(selectedroomindex)
-
-# get the room object from the rooms list
-selectedrooms = []
-for index in roomindex:
-    selectedrooms.append(rooms[index])
-
-# get the list of all view templates
-views_all = DB.FilteredElementCollector(doc).OfClass(DB.View).WhereElementIsNotElementType().ToElements()
-vfts_all = DB.FilteredElementCollector(doc).OfClass(DB.ViewFamilyType).WhereElementIsElementType().ToElements()
-templates_all, templates_3D, template_3D_names = [], [], []
-for v in views_all:
-    if v.IsTemplate:
-        templates_all.append(v)
-        if v.ViewType == DB.ViewType.ThreeD:
-            templates_3D.append(v)
-            template_3D_names.append(v.Name)
-            
-selectedtemplatename = forms.SelectFromList.show(template_3D_names, button_name='Select Template', multiselect=False, title='Select Template', message='Select a 3D view template to use')
-if selectedtemplatename == None:
+templates = [v for v in DB.FilteredElementCollector(doc).OfClass(DB.View)
+             if v.IsTemplate and v.ViewType == DB.ViewType.ThreeD]
+if not templates:
+    forms.alert("No 3D view templates found in the project. Create one first.",
+                title="No 3D Templates",
+                exitscript=True)
+template_by_name = {t.Name: t for t in templates}
+template_name = forms.SelectFromList.show(
+    sorted(template_by_name.keys()),
+    title="Select 3D View Template",
+    button_name="Apply Template",
+)
+if not template_name:
     script.exit()
-# get the index of the selectedtemplatename in the template_3D_names list
-selectedtemplateindex = template_3D_names.index(selectedtemplatename)
-# get the template object from the templates_3D list
-selectedtemplate = templates_3D[selectedtemplateindex]
+template = template_by_name[template_name]
 
-# Get the list of all view types in the model
-view3Dtypes = DB.FilteredElementCollector(doc).OfClass(DB.ViewFamilyType).WhereElementIsElementType().ToElements()
-# get the view type object for the 3D view using ViewFamily.ThreeDimensional
-view3dtype = [v for v in view3Dtypes if v.ViewFamily == DB.ViewFamily.ThreeDimensional][0]
+view3d_type = next((t for t in DB.FilteredElementCollector(doc).OfClass(DB.ViewFamilyType)
+                    if t.ViewFamily == DB.ViewFamily.ThreeDimensional), None)
+if not view3d_type:
+    forms.alert("Could not find a 3D view family type in the project.",
+                title="No 3D View Type",
+                exitscript=True)
 
+# If the active view is one of the views we're about to delete-and-recreate,
+# navigate away first so Revit doesn't choke on an active-view delete.
+existing_views_3d = list(DB.FilteredElementCollector(doc)
+                         .OfClass(DB.View3D)
+                         .WhereElementIsNotElementType()
+                         .ToElements())
+existing_by_name = {v.Name: v for v in existing_views_3d}
+target_names = {_view_name_for(r) for r in selected_rooms}
+active_view = doc.ActiveView
+if active_view and active_view.Name in target_names:
+    starting_view_id = DB.StartingViewSettings.GetStartingViewSettings(doc).ViewId
+    starting_view = doc.GetElement(starting_view_id)
+    if starting_view:
+        uidoc.ActiveView = starting_view
 
-#####____________Determine if the view already exists____________#####
-
-
-# Get the list of the 3d views in the model
-views3D = DB.FilteredElementCollector(doc).OfClass(DB.View3D).WhereElementIsNotElementType().ToElements()
-for room in selectedrooms:
-    viewnamestring = "ROOM AXON _ " + room.get_Parameter(DB.BuiltInParameter.ROOM_NUMBER).AsString() + " - " + room.get_Parameter(DB.BuiltInParameter.ROOM_NAME).AsString()
-    for v in views3D:
-        if v.Name == viewnamestring:
-            print("View already exists <" + viewnamestring + "> is being recreated")
-            #if the view is currently the active view navigate to the starting view
-            if v.Id == activeview.Id:
-                #get the starting view
-                starting_view_id = DB.StartingViewSettings.GetStartingViewSettings(doc).ViewId
-                starting_view = doc.GetElement(starting_view_id)
-                #set the active view to the starting view
-                HOST_APP.uidoc.RequestViewChange(starting_view)
-                HOST_APP.uidoc.ActiveView = starting_view
-
-
-views3Dlist = []
-#####____________Transaction Start____________#####
-
-with revit.Transaction('Create Room Axonometric Views'):
-    #loop through the selected rooms
-
-    
-    for room in selectedrooms:
-        viewnamestring = "ROOM AXON _ " + room.get_Parameter(DB.BuiltInParameter.ROOM_NUMBER).AsString() + " - " + room.get_Parameter(DB.BuiltInParameter.ROOM_NAME).AsString()
-        #Get the list of the 3d views in the model
-        views3D = DB.FilteredElementCollector(doc).OfClass(DB.View3D).WhereElementIsNotElementType().ToElements()
-        for v in views3D:
-            if v.Name == viewnamestring:
-                #if the view already exists delete the view
-                doc.Delete(v.Id)
-                                
-        #create a 3D view
-        view3d = DB.View3D.CreateIsometric(doc, view3dtype.Id)
-        #get the bounding box of the room
-        bb = room.get_BoundingBox(revit.doc.ActiveView)
-        #adjust the section box to the bounding box of the room
-        view3d.SetSectionBox(bb)
-        #set the view name to the selected room name and numeber
-        view3d.Name = viewnamestring
-        #set the view scale to 1/4" = 1'-0"
-        view3d.Scale = 48
-        #set the view discipline to architectural
+created_views = []
+skipped_rooms = []
+with revit.Transaction("Create Room Axon Views"):
+    for room in selected_rooms:
+        bbox = room.get_BoundingBox(None)
+        if not bbox:
+            skipped_rooms.append(_room_label(room))
+            continue
+        existing = existing_by_name.get(_view_name_for(room))
+        if existing:
+            doc.Delete(existing.Id)
+        view3d = DB.View3D.CreateIsometric(doc, view3d_type.Id)
+        view3d.SetSectionBox(bbox)
+        view3d.Name = _view_name_for(room)
+        view3d.Scale = VIEW_SCALE
         view3d.Discipline = DB.ViewDiscipline.Architectural
-        #set the view template to the selected template
-        view3d.ViewTemplateId = selectedtemplate.Id
-        # open the view in the active window
-        views3Dlist.append(view3d)
+        view3d.ViewTemplateId = template.Id
+        created_views.append(view3d)
 
-for v in views3Dlist:
-    #open the view in the active window
-    UI.UIDocument.RequestViewChange(revit.uidoc, v)
-    #set the active view to the view
-    revit.uidoc.ActiveView = v
+output = script.get_output()
+output.print_md("### Room Axon Views")
+output.print_md("**Created: {}**".format(len(created_views)))
+for v in created_views:
+    output.print_md("- {} — {}".format(output.linkify(v.Id), v.Name))
+if skipped_rooms:
+    output.print_md("\n**Skipped (no 3D bounding box): {}**".format(len(skipped_rooms)))
+    for label in skipped_rooms:
+        output.print_md("- {}".format(label))
 
-
-
-
-
-
+if created_views:
+    uidoc.ActiveView = created_views[-1]
