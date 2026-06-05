@@ -1,12 +1,6 @@
-tooltip:
-
-  en_us: Measure the length of a selected element, or the distance between two points, in the active view. Provides an output summary and a list of the measured elements.
-
 title:
-
-  en_us: >-
-    Quick Length
-authors:
-  - 'Tay Othman'
-
-min_revit_version: 2020
+  en_us: "Quick\nLength"
+tooltip:
+  en_us: |
+    Modeless live-updating length tool. Sum lengths of selected walls, model lines, detail lines, and line-based families — total updates as you change the selection. Pick imperial (fractional feet-inches, decimal feet-inches) or metric (m / cm / mm), precision, and category filters.
+context: doc-required

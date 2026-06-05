@@ -6,6 +6,11 @@ and any element containing a length parameter. Displays total with
 configurable units, precision, category filtering, element breakdown,
 and live-selection mode via modeless window.
 """
+__title__ = "Quick\nLength"
+__doc__ = "Sum the total length of selected elements with unit conversion"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
 
 # Persistent engine keeps the script alive for the modeless window
 __persistentengine__ = True

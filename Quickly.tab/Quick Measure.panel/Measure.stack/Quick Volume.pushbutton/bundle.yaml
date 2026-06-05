@@ -1,0 +1,6 @@
+title:
+  en_us: "Quick\nVolume"
+tooltip:
+  en_us: |
+    Modeless live-updating volume tool. Sum volumes of selected walls, floors, roofs, ceilings, rooms, columns, beams, and foundations — total updates as you change the selection. Pick imperial (cu ft / cu in / cu yd) or metric (cu m / L / cu cm), precision, and category filters.
+context: doc-required
