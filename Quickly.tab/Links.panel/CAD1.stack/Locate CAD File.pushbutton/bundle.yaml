@@ -1,6 +1,0 @@
-title:
-  en_us: "Locate CAD\nFile"
-tooltip:
-  en_us: |
-    Open the folder containing the source DWG/DXF file for the selected CAD link in File Explorer. Works on linked CAD only — embedded CAD imports have no resolvable path.
-context: selection

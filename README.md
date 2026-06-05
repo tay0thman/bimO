@@ -2,7 +2,7 @@
 
 A productivity-focused [pyRevit](https://github.com/pyrevitlabs/pyRevit) extension by an architect, for architects.
 
-Quickly is a curated set of Revit tools that streamline the repetitive parts of producing a drawing set — measuring, annotating, coordinating, naming, numbering, and chasing down the small stuff that eats hours every week. Built around the idea that working *smarter* beats working *harder*.
+Quickly is a curated set of Revit tools that streamline the repetitive parts of producing a drawing set — measuring, naming, numbering, and chasing down the small stuff that eats hours every week. Built around the idea that working *smarter* beats working *harder*.
 
 ## Status
 
@@ -37,13 +37,6 @@ Modeless, live-updating WPF windows for fast measurement of selected elements:
 - **Find Dim Overrides** — list dimensions with overridden values
 - **Find Rounded Dims** — find dimensions whose displayed value differs from the true measurement, with tolerance
 
-### Annotate
-- **Flip Grids** — toggle grid bubbles on selected grids
-- *(Linetype Manager — under construction; see roadmap)*
-
-### Coordination
-- **Select Attached Walls by Type** — find walls attached at top for chosen wall types and levels
-
 ### Drawing Set
 - **Detail Naming** — bulk-rename viewports to *SheetNumber – DetailNumber – ViewName*
 - **Detail Numbering** — auto-number viewports on a sheet based on their position
@@ -64,9 +57,6 @@ Modeless, live-updating WPF windows for fast measurement of selected elements:
 - **Room Axon** — generate an isometric 3D view per selected room, scoped via section box
 
 ### Links
-- **Find CAD** — categorize CAD links by 2D detail vs 3D model
-- **Locate CAD File** — open the source folder of a selected CAD link
-- **DWG Trace** — trace a DWG/DXF link as native Revit detail lines / filled regions
 - **Sync Link Graphics** — copy Revit link graphic overrides from one view template to many
 
 ### Cloud
@@ -77,9 +67,9 @@ Modeless, live-updating WPF windows for fast measurement of selected elements:
 
 ## Roadmap
 
-- Combined **Linetype Manager** (duplicate + rename in one dialog)
-- Per-tool tooltips and `help_url` on every button
-- Standardized script headers across all tools
+- Per-tool `help_url` on every button once docs exist
+- Panel-level icons
+- CHANGELOG
 
 ## Author
 
