@@ -1,60 +1,54 @@
-"""Searches for text notes that contain code years other than the current code year.this is important to detect and fix any outdated code years in the project.
+# -*- coding: utf-8 -*-
+# Author: Tay Othman
+"""Scan text notes for 4-digit code years (2007–2031) that aren't the project's current code year.
 
-Copyright (c) 2023 Tay Othman
-https://www.tayothman.com
+Useful for catching stale code-cycle references (CBC, IBC, ADA, 11B…) before issuance.
 """
-#pylint: disable=import-error,invalid-name,broad-except,superfluous-parens
-import clr
+import re
 
-clr.AddReference('RevitAPI')
-from Autodesk.Revit.DB import * #use ElementId
-from pyrevit import revit, DB, HOST_APP
-from pyrevit import forms
-from pyrevit import script
-from System.Collections.Generic import List
-import sys
-import os
+from pyrevit import revit, DB, forms, script
 
-from pyrevit import output
+__title__ = "Find Code\nSections"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
+
+CODE_YEARS = ["2016", "2019", "2022", "2025", "2028", "2031"]
+YEAR_RANGE = range(2007, 2032)
+YEAR_RE = re.compile(r"\b(?:" + "|".join(str(y) for y in YEAR_RANGE) + r")\b")
+
+doc = revit.doc
 output = script.get_output()
 
-__author__ = 'Tay Othman, AIA'
+current_year = forms.CommandSwitchWindow.show(
+    CODE_YEARS,
+    message="What is this project's current code cycle year?",
+)
+if current_year is None:
+    script.exit()
 
-# Set the active Revit application and document
-doc = __revit__.ActiveUIDocument.Document
-# get all text notes in the entire document
-text_notes = DB.FilteredElementCollector(revit.doc).OfClass(DB.TextNote)
-# remark  --------- text_notes = DB.FilteredElementCollector(revit.doc, revit.active_view.Id).OfClass(DB.TextNote)
-abbTextnotes = []
-abbTextIds = []
-abbTextSegments = []
+text_notes = list(DB.FilteredElementCollector(doc).OfClass(DB.TextNote))
+matches = []  # list of (text_note, year_token, context)
+for note in text_notes:
+    text = note.Text or ""
+    for m in YEAR_RE.finditer(text):
+        token = m.group(0)
+        if token == current_year:
+            continue
+        start = max(0, m.start() - 30)
+        end = min(len(text), m.end() + 30)
+        context = text[start:end].replace("\n", " ").strip()
+        matches.append((note, token, context))
+        break  # one hit per text note is enough for reporting
 
-# display at dialogbox with dropdown for current code years 2007, 2010, 2013, 2016, 2019, 2022, 2025
-from pyrevit import forms
-# prompt user to select a code year
-code_year = forms.CommandSwitchWindow.show(["2016", "2019", "2022", "2025", "2028", "2031"], message="Select a code year", title="Code Year", exit_name="Cancel")
-# Test out if the code year is empty
-if code_year == None:
-    sys.exit()
-# loop through the entire text notes to check for the patterns of the years from "2010" to "2025" also look for the pattern of words "CBC", "11B" and "ADA"
-for text_note in text_notes:
-    if any(word in text_note.Text for word in [str(year) for year in range(2007, 2031) if year != int(code_year)]):
-        abbTextnotes.append(text_note)
-        abbTextIds.append(text_note.Id)
-        abbTextSegments.append(text_note.Text)
+output.print_md("# Code-Year Scan — current year `{}`".format(current_year))
+output.print_md("- Text notes scanned: **{}**".format(len(text_notes)))
+output.print_md("- Notes containing other code years: **{}**".format(len(matches)))
 
-# make a iCollection of text notes
+if not matches:
+    output.print_md("\nNo stale code-year references found.")
+    script.exit()
 
-abbTextnotes_toIsolate = List[ElementId](i.Id for i in abbTextnotes)
-print('Found {} text notes'.format(len(abbTextnotes)))
-
-for text_note in abbTextnotes:
-    text = text_note.Text
-    for text_note in abbTextnotes:
-            text = text_note.Text
-            for word in [str(year) for year in range(2007, 2031) if year != int(code_year)]:
-                if word in text:
-                    index = text.index(word)
-                    prefix = text[index-10:index]
-                    suffix = text[index+len(word):index+len(word)+10]
-                    output.print_md('{} text:\"{}\"'.format(output.linkify(text_note.Id), prefix + word + suffix))
+for note, token, context in matches:
+    output.print_md("- **{}** in {} — `…{}…`"
+                    .format(token, output.linkify(note.Id), context))

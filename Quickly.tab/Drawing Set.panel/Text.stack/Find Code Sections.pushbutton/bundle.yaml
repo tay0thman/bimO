@@ -1,0 +1,6 @@
+title:
+  en_us: "Find Code\nSections"
+tooltip:
+  en_us: |
+    Scan text notes across the project for any 4-digit code year (2007–2031) that isn't the project's current code year. Output lists every match with surrounding context and a clickable element link — useful for catching stale CBC/IBC references before issuance.
+context: doc-required

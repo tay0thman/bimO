@@ -1,0 +1,6 @@
+title:
+  en_us: "Package\nContents"
+tooltip:
+  en_us: |
+    Scan a folder (and optionally its subfolders) for PDFs and generate a `file_contents.csv` index of sheet number, sheet name, and subfolder. Output opens automatically in the default CSV handler.
+context: zero-doc

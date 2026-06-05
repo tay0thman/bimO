@@ -1,0 +1,6 @@
+title:
+  en_us: View Pan
+tooltip:
+  en_us: |
+    Translate the crop boxes of selected views on a sheet by an X / Y / Z offset (in feet) so the same scope shifts to a new on-sheet location. Useful for nudging enlarged plans into alignment with sheet titleblocks.
+context: doc-required

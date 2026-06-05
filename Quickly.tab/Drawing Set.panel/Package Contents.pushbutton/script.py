@@ -1,102 +1,88 @@
+# -*- coding: utf-8 -*-
+# Author: Tay Othman
+"""Scan a folder (and optionally its subfolders) for PDFs and write a file_contents.csv index.
+
+Each row records the sheet number, sheet name (split on the first "-" in the
+filename), and the subfolder name if any. The CSV is saved into the folder
+that was scanned and opened automatically.
+"""
 import os
 import csv
-import sys
-import clr
-clr.AddReference('System.Windows.Forms')
-clr.AddReference('System.Drawing')
-clr.AddReference('RevitAPI')
-clr.AddReference('RevitAPIUI')
-from pyrevit import forms
-from pyrevit import script
-from pyrevit import revit
 
-__author__ = 'Tay Othman, AIA'
+from pyrevit import forms, script
 
-# create a folder browser dialog to select the folder
+__title__ = "Package\nContents"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
+
+
+def _pdf_to_row(filename, subfolder_name=""):
+    """Split <sheet number>-<sheet name>.pdf into [number, name, subfolder]. Returns None on bad format."""
+    stem, ext = os.path.splitext(filename)
+    if ext.lower() != ".pdf" or "-" not in stem:
+        return None
+    number, _, name = stem.partition("-")
+    return [number.strip(), name.strip(), subfolder_name]
+
+
 folder_path = forms.pick_folder()
+if not folder_path:
+    script.exit()
+if not os.path.isdir(folder_path):
+    forms.alert("Folder does not exist:\n{}".format(folder_path),
+                title="No Such Folder",
+                exitscript=True)
 
-# create an empty list to store the file names
-subfiles = []
-# Check if the folder exists
-if os.path.exists(folder_path):
-    files = os.listdir(folder_path)
-    # prompt to include the files on the main folder in addition to the files on the subfolders
-    
-    include_main_folder = forms.ask_for_one_item(["Yes", "No"], default="Yes", prompt="Include the files on the main folder in addition to the files on the subfolders?", title="Include Main Folder", width=300, height=200)
-    # if the user cancels the dialog
-    if include_main_folder == None:
-        # exit the program
-        sys.exit()
-    # if the user wants to include the files on the main folder
-    if include_main_folder == True:
-        # loop through the files in the folder
-        for file in files:
-            # if the file is a pdf file
-            if file.endswith('.pdf'):
-                # add the file to the subfiles list
-                subfiles.append([file.split('-')[0], file.split('-')[1], ''])
-            # if the file is a folder
-            elif os.path.isdir(os.path.join(folder_path, file)):
-                # loop through the files in the subfolder
-                for subfile in os.listdir(os.path.join(folder_path, file)):
-                    # if the file is a pdf file
-                    if subfile.endswith('.pdf'):
-                        # check if the subfile contains a hyphen before splitting it
-                        if '-' in subfile:
-                            # add the file to the subfiles list
-                            subfiles.append([subfile.split('-')[0], subfile.split('-')[1], file])
-                        else:
-                            print("Warning: {0} does not contain a hyphen and will be skipped.".format(subfile))
-    # if the user does not want to include the files on the main folder
-    else:
-        # loop through the files in subfolders only
-        for file in files:
-            # if the file is a folder
-            if os.path.isdir(folder_path + "\\" + file):
-                # loop through the files in the subfolder
-                for subfile in os.listdir(folder_path + "\\" + file):
-                    # if the file is a pdf file
-                    if subfile.endswith('.pdf'):
-                        #search for file extension and remove it from the file name look for the last 4 characters
-                        if subfile[-4] == '.':
-                            # remove the last 4 characters from the file name
-                            subfile = subfile[:-4]
+include_main = forms.alert(
+    "Include PDFs in the root folder alongside the subfolders?",
+    title="Scan Scope",
+    yes=True, no=True,
+)
 
-                        # check if the subfile contains a hyphen before splitting it
-                        if '-' in subfile:
-                            # add the file to the subfiles list
-                            subfiles.append([subfile.split('-')[0], subfile.split('-')[1], file])
-                        else:
-                            print("Warning: {0} does not contain a hyphen and will be skipped.".format(subfile))
-                   
-# if the folder does not exist
-else:
-    print("The folder does not exist")
-    # exit the program
-    exit()
+rows = []
+warnings = []
+entries = os.listdir(folder_path)
 
+if include_main:
+    for name in entries:
+        full = os.path.join(folder_path, name)
+        if os.path.isfile(full) and name.lower().endswith(".pdf"):
+            row = _pdf_to_row(name)
+            if row:
+                rows.append(row)
+            else:
+                warnings.append("Skipped (no hyphen): {}".format(name))
 
-# confirm the file is not being used by another program
+for name in entries:
+    sub_path = os.path.join(folder_path, name)
+    if not os.path.isdir(sub_path):
+        continue
+    for sub_name in os.listdir(sub_path):
+        if not sub_name.lower().endswith(".pdf"):
+            continue
+        row = _pdf_to_row(sub_name, subfolder_name=name)
+        if row:
+            rows.append(row)
+        else:
+            warnings.append("Skipped (no hyphen): {}/{}".format(name, sub_name))
+
+csv_path = os.path.join(folder_path, "file_contents.csv")
 try:
-    # open the file
-    file = open(folder_path + "\\file_contents.csv", "wb")
-    # close the file
-    file.close()
-# if the file is being used by another program
-except IOError:
-    # prompt the user to close the file
-    forms.alert("Please close the file and try again.", title="File is Open", header="File is Open", exit=True)
-# create a csv file to store the file contents save the file in the same folder as folder_path
-with open(folder_path + "\\file_contents.csv", "wb") as file:
+    with open(csv_path, "w") as f:
+        writer = csv.writer(f, lineterminator="\n")
+        writer.writerow(["SHEET NUMBER", "SHEET NAME", "SUBFOLDER"])
+        for row in rows:
+            writer.writerow(row)
+except IOError as ex:
+    forms.alert("Could not write file_contents.csv. Is it open in Excel?\n\n{}".format(ex),
+                title="Write Failed",
+                exitscript=True)
 
-    # create a csv writer object
-    writer = csv.writer(file)
-    # write the header row
-    writer.writerow(["SHEET NUMBER", "SHEET NAME", "SUBFOLDER"])
-    # write the file contents
-    for subfile in subfiles:
-        writer.writerow(subfile)
+if warnings:
+    print("Warnings:")
+    for w in warnings:
+        print("  " + w)
+print("\nWrote {} row(s) to: {}".format(len(rows), csv_path))
 
-#
-# open the csv file
-os.startfile(folder_path + "\\file_contents.csv")   
+os.startfile(csv_path)

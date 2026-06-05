@@ -1,99 +1,85 @@
 # -*- coding: utf-8 -*-
-__title__   = "Pan Views"
-__doc__     = """Version = 1.0
-Date    = 10.17.2024
-________________________________________________________________
-Description:
-Pan / Translate the view's crop box by a specified distance
-________________________________________________________________
-How-To:
-1. Select a sheet
-2. Select the views to pan
-3. Enter the translation values
-4. Enjoy the fun animations.
-________________________________________________________________
-TODO:
-[FEATURE] - 1- Initial release
-[KNOWN ISSUES] - 1- Some detail elements are not moving with the view
-________________________________________________________________
-Last Updates:
-- [10.22.2024] v0.1 Initial Prototype
-________________________________________________________________
-Author: Tay Othman"""
+# Author: Tay Othman
+"""Translate the crop boxes of selected views on a sheet by an X / Y / Z offset (in feet).
 
-#_______________________________________________________________________imports
-from pyrevit import script, revit, DB, forms, HOST_APP
+Workflow:
+1. Pick a sheet.
+2. Pick the views on that sheet whose crop boxes you want to nudge.
+3. Enter X, Y, Z translation values in feet.
 
-# Select a Sheet from the list
-sheet = forms.select_sheets(title='Select Sheet',
-                                button_name='Select Sheet',
-                                multiple=False)
+Note: filled-region and some detail elements may not move with the view —
+they're tied to the view rather than the crop box.
+"""
+from pyrevit import revit, DB, forms, script
+
+__title__ = "View Pan"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
 
 doc = revit.doc
-# Get the list of views on the selected sheet
-view_names = []
-view_elements = []
-views = sheet.GetAllPlacedViews()
-if views == None:
+
+sheet = forms.select_sheets(title="Select Sheet",
+                            button_name="Use This Sheet",
+                            multiple=False)
+if not sheet:
     script.exit()
-for view in views:
-    view_element = doc.GetElement(view)
-    view_elements.append(view_element)
-    view_names.append(view_element.Name)
 
-selected_view_names = forms.SelectFromList.show(view_names, 
-                                            button_name='Select Views',
-                                            multiselect=True)
-if selected_view_names is None:
+view_ids = list(sheet.GetAllPlacedViews())
+if not view_ids:
+    forms.alert("The selected sheet has no views placed on it.",
+                title="No Views",
+                exitscript=True)
+views_by_name = {doc.GetElement(vid).Name: doc.GetElement(vid) for vid in view_ids}
+
+selected_view_names = forms.SelectFromList.show(
+    sorted(views_by_name.keys()),
+    button_name="Pan These Views",
+    multiselect=True,
+)
+if not selected_view_names:
     script.exit()
-selected_views = []
+selected_views = [views_by_name[n] for n in selected_view_names]
 
-for view_name in selected_view_names:
-    if view_name in view_names:
-        view_obj = view_elements[view_names.index(view_name)]
-        selected_views.append(view_obj)
 
-# Get the translation values
-x = forms.ask_for_number_slider( default=0, interval=1, min=-100, max=100,
-                                 prompt='Enter the translation value in feet',
-                                 title='X Translation')
-y = forms.ask_for_number_slider( default=0, interval=1, min=-100, max=100,
-                                prompt='Enter the translation value in feet',
-                                title='Y Translation')
-z = forms.ask_for_number_slider( default=0, interval=1, min=-100, max=100,
-                                prompt='Enter the translation value in feet',
-                                title='Z Translation')
+def _ask_translation(axis):
+    return forms.ask_for_number_slider(
+        default=0, interval=1, min=-100, max=100,
+        prompt="Translation in feet ({})".format(axis),
+        title="{} Translation".format(axis),
+    )
 
-#______________________________________________________________Main Transaction
-with revit.Transaction('Move View Origin'):
+
+x = _ask_translation("X")
+y = _ask_translation("Y")
+z = _ask_translation("Z")
+if x is None or y is None or z is None:
+    script.exit()
+translate = DB.XYZ(x, y, z)
+
+non_type_filter = DB.ElementIsElementTypeFilter(True)
+moved = 0
+failed = []
+with revit.Transaction("Pan Views"):
     for view in selected_views:
-                # Activate crop box
         view.CropBoxVisible = True
-        filter = DB.ElementIsElementTypeFilter(True)
-        dependent_ids = view.GetDependentElements(filter)
-        print(dependent_ids[0])
+        dependent_ids = view.GetDependentElements(non_type_filter)
+        if not dependent_ids:
+            failed.append((view.Name, "view has no dependent crop element"))
+            continue
         dependent = doc.GetElement(dependent_ids[0])
- 
-        # move the view element 4 feet up
-        translate_vector = DB.XYZ(x, y, z)
-        location_prop = dependent.Location.Move(translate_vector)
-        print("Done")
-        print("")
-        # Deactivate crop box
+        try:
+            dependent.Location.Move(translate)
+            moved += 1
+        except Exception as ex:
+            failed.append((view.Name, str(ex)))
         view.CropBoxVisible = False
         view.CropBoxActive = True
 
-
-        # <Likely not needed> move filled regions
-
-        # col1 = (DB.FilteredElementCollector(doc, view.Id)
-        #                                         .OfClass(DB.FilledRegion)
-        #                                         .WhereElementIsNotElementType()
-        #                                         .ToElements())
-
-        # for col in col1:
-        #     try:
-        #         col.Location.Move(translate_vector)
-        #     except:
-        #         print("Error moving filled region" + str(col.Id))
-        #         pass
+output = script.get_output()
+output.print_md("# View Pan")
+output.print_md("**Panned {} view(s) by ΔX={} ΔY={} ΔZ={} ft.**".format(moved, x, y, z))
+if failed:
+    output.print_md("\n**Skipped:**")
+    for name, reason in failed:
+        output.print_md("- `{}` — {}".format(name, reason))

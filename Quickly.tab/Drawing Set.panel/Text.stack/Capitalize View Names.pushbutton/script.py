@@ -1,65 +1,45 @@
+# -*- coding: utf-8 -*-
+# Author: Tay Othman
+"""Find every view placed on a sheet whose name contains lowercase letters and uppercase the picked ones in one transaction."""
+from pyrevit import revit, DB, forms, script
 
-"""Select multiple sheets from a list"""
-#pylint: disable=import-error,invalid-name
-from Autodesk.Revit.DB import *
-from Autodesk.Revit.UI import *
-from pyrevit import forms, revit
-import sys
-import os
-appdata = str(os.getenv('APPDATA'))
-print (appdata)
-import clr
-clr.AddReference('RevitAPI')
-from System.Collections.Generic import List
-from pyrevit import forms as frm
+__title__ = "Capitalize\nView Names"
+__author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
 
-libpath = appdata + "\\pyRevit-Master\\extensions\\DES.extension\\lib"
-sys.path.append(appdata + "\\pyRevit-Master\\extensions\\DES.extension\\lib")
+doc = revit.doc
 
-import __telemetry as telemetry
+viewports = list(DB.FilteredElementCollector(doc).OfClass(DB.Viewport))
+candidates = []  # list of (view_element, current_name)
+for vp in viewports:
+    view = doc.GetElement(vp.ViewId)
+    name = view.Name
+    if any(c.islower() for c in name):
+        candidates.append((view, name))
 
-__author__ = 'Tay Othman, AIA'
+if not candidates:
+    forms.alert("All views on sheets are already fully uppercase.",
+                title="Nothing To Do",
+                exitscript=True)
 
-# Set the active Revit application and document
-doc = __revit__.ActiveUIDocument.Document
+selected_names = forms.SelectFromList.show(
+    sorted({name for _, name in candidates}),
+    title="Pick views to uppercase",
+    button_name="Capitalize",
+    multiselect=True,
+)
+if not selected_names:
+    script.exit()
 
-# Get all views placed on sheets
-views_on_sheets =  FilteredElementCollector(doc).OfClass(Viewport).ToElements()
+selected_set = set(selected_names)
+to_update = [(v, n) for v, n in candidates if n in selected_set]
 
-# Create an empty list to store views with lowercase letters in their names
-views_with_lowercase = []
-Viewnames = []
-ViewIDS = []
+with revit.Transaction("Capitalize View Names"):
+    for view, old_name in to_update:
+        param = view.get_Parameter(DB.BuiltInParameter.VIEW_NAME)
+        if param and not param.IsReadOnly:
+            param.Set(old_name.upper())
+            print("{} >>>>>> {}".format(old_name, old_name.upper()))
 
-# Loop through all views on sheets and find views with at least one lower case letter in their names and append it to the list
-for view in views_on_sheets:
-    viewId = doc.GetElement(view.ViewId)
-    viewname = viewId.Name
-    if any(c.islower() for c in viewname):
-        views_with_lowercase.append(view)
-        ViewIDS.append(view.Id)
-        Viewnames.append(viewname)
-        
-
-# Display a checklist form with all the view names and a checkbox to filter the list
-selected_views = frm.SelectFromList.show(Viewnames, button_name='Capitalize!!', multiselect=True, checked_only=True)
-if selected_views:
-    # Filter the list of views based on the selected views
-    filtered_views = [view for view in views_on_sheets if doc.GetElement(view.ViewId).Name in selected_views]
-else:
-    sys.exit()
-# Loop through the filtered views and capitalize their names
-for view in filtered_views:
-    view_name = doc.GetElement(view.ViewId).Name
-    view_name_upper = view_name.upper()
-    print(view_name + " >>>>>>>>> " + view_name_upper)
-    with Transaction(doc, 'Set Capitalized Name') as tx:
-        tx.Start()
-        view.get_Parameter(BuiltInParameter.VIEW_NAME).Set(view_name_upper)
-        tx.Commit()
-    
-
-# Show a message box indicating the number of views that were capitalized
-forms.alert("Capitalized the names of {} views.".format(len(filtered_views)))
-
-
+forms.toast("Capitalized {} view(s)".format(len(to_update)), title="Capitalize View Names")

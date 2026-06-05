@@ -1,13 +1,6 @@
-tooltip:
-
-  en_us: Detect and fix abbreviations in the drawing set, to match a format without intermediate periods (ex. UON. instead of U.O.N.)
-
 title:
-
-  en_us: >-
-    Fix Abbreviations
-  
-authors:
-  - 'Tay Othman'
-
-min_revit_version: 2020
+  en_us: "Fix\nAbbreviations"
+tooltip:
+  en_us: |
+    Find text notes containing dotted abbreviations like "U.O.N." or "M.E.P." and convert each to a no-intermediate-period form with a single trailing period — "UON.", "MEP.". Preview which notes to fix before committing.
+context: doc-required

@@ -1,100 +1,74 @@
-from pyrevit import revit, DB
-from pyrevit import forms
-from pyrevit import script
-doc = __revit__.ActiveUIDocument.Document
+# -*- coding: utf-8 -*-
+# Author: Tay Othman
+"""Find text notes containing dotted abbreviations like "U.O.N." and convert each match to "UON.".
 
-#_________________Logging
-# ping this folder to check if it is accessible
-import os
-import getpass
-from datetime import datetime
-import os
-import sys
+A dotted abbreviation is any whitespace-separated token longer than 3 chars
+that starts with an uppercase letter, has a period in position 2, and an
+uppercase letter in position 3 (so "U.O.N.", "M.E.P.", "T.B.D.") all match.
+"""
+from pyrevit import revit, DB, forms, script
 
+__title__ = "Fix\nAbbreviations"
 __author__ = "Tay Othman, AIA"
+__min_revit_ver__ = 2024
+__max_revit_ver__ = 2027
 
-# Class to show Textnotes by Text Segment
-class TextNoteText(forms.TemplateListItem):
+doc = revit.doc
+
+
+def _is_dotted_abbreviation(word):
+    return len(word) > 3 and word[0].isupper() and word[1] == "." and word[2].isupper()
+
+
+def _context_around(text, match_word):
+    words = text.split()
+    if match_word not in words:
+        return text[:80] + ("…" if len(text) > 80 else "")
+    i = words.index(match_word)
+    return " ".join(words[max(0, i - 20):min(len(words), i + 20)])
+
+
+class _TextNoteItem(forms.TemplateListItem):
     @property
     def name(self):
-        txtnote = doc.GetElement(self.item).Text
-        # find the index of the first word that matches the pattern
-        for word in txtnote.split():
-            if len(word) > 3 and word[0].isupper() and word[1] == '.' and word[2].isupper():
-                index = txtnote.split().index(word)
-                # return the 10 words before and after the matched word
-                txtseg = ' '.join(txtnote.split()[index-20:index+20])
-        return txtseg
-  
+        note = doc.GetElement(self.item)
+        text = note.Text or ""
+        for w in text.split():
+            if _is_dotted_abbreviation(w):
+                return _context_around(text, w)
+        return text
 
-# Begin the script
-# get all text notes in the entire document
-text_notes = DB.FilteredElementCollector(revit.doc).OfClass(DB.TextNote)
-# remark  --------- text_notes = DB.FilteredElementCollector(revit.doc, revit.active_view.Id).OfClass(DB.TextNote)
-abbTextnotes = []
-abbTextIds = []
-abbTextSegments = []
-displayText = []
-counter = 0
-# loop through each text note and check if any individual word matches the "*.x.*" pattern where x is an uppercase letter while * is any number of characters
-for text_note in text_notes:
-    text = text_note.Text
-    # check if any word in the text note matches the pattern 
-    if any(len(word) > 3 and word[0].isupper() and word[1] == '.' and word[2].isupper() for word in text.split()):
-        # append the text note to the list
-        abbTextnotes.append(text_note)
-        abbTextIds.append(text_note.Id)
-        # split the text note into individual words
-        # create a string variable "displayText" that will be displayed in the SelectFromList dialog, the display text will inclode the matched word and the 10 words around it
-        for word in text.split():
-            if len(word) > 3 and word[0].isupper() and word[1] == '.' and word[2].isupper():
-                index = text.split().index(word)
-                displayText.append(' '.join(text.split()[index-20:index+20]))
-                break
-        # append the display text to abbtextsegments
-        abbTextSegments.append(displayText)
-# Terminate the script if there are no text notes that match the pattern
-if len(abbTextnotes) == 0:
-    forms.alert('No text notes match the pattern', title='No text notes found')
-    script.exit()
-            
-# select all text notes that match the pattern
-# use the SelectFromList class to display a list of text notes and allow the user to select one or more    
-selectionfilter = forms.SelectFromList.show([TextNoteText(abb) for abb in abbTextIds] , button_name='Select Text Notes', multiselect=True, button_exit_name='Done')
-# Terminate the script if the selection is cancelled
-if selectionfilter is None:
+
+text_notes = list(DB.FilteredElementCollector(doc).OfClass(DB.TextNote))
+matching_ids = [n.Id for n in text_notes
+                if any(_is_dotted_abbreviation(w) for w in (n.Text or "").split())]
+
+if not matching_ids:
+    forms.alert("No text notes contain a dotted abbreviation.",
+                title="Nothing To Fix",
+                exitscript=True)
+
+picked = forms.SelectFromList.show(
+    [_TextNoteItem(nid) for nid in matching_ids],
+    button_name="Fix Selected",
+    multiselect=True,
+)
+if not picked:
     script.exit()
 
-# Create a transaction
-with revit.Transaction('Remove Abbreviations'):
-    # Loop through the selection filter and update the text notes
-    for text_note in selectionfilter:
-        # get the text of the text note
-        text = doc.GetElement(text_note).Text
-        # split the text note into individual words
-        for word in text.split():
-            # check if the word matches the pattern
-            if len(word) > 3 and word[0].isupper() and word[1] == '.' and word[2].isupper():
-                # get the index of the word in the list of words
-                index = text.split().index(word)
-                # Remove periods from the word
-                word = word.replace('.', '')
-                #append a single period to the word
-                word = word + '.'
-                # update text with the new word
-                text = text.replace(text.split()[index], word)
-                # update the text note
-                doc.GetElement(text_note).Text = text
-                # update the counter
-                counter += 1
-                # break out of the loop
-                break
-# End the transaction
+fixed_count = 0
+with revit.Transaction("Fix Abbreviations"):
+    for note_id in picked:
+        note = doc.GetElement(note_id)
+        words = (note.Text or "").split()
+        changed = False
+        for idx, word in enumerate(words):
+            if _is_dotted_abbreviation(word):
+                words[idx] = word.replace(".", "") + "."
+                changed = True
+        if changed:
+            note.Text = " ".join(words)
+            fixed_count += 1
 
-# Display a message box to show the number of text notes that were updated
-forms.alert('Updated {} text notes'.format(counter), title='Text Notes Updated', warn_icon=False)
-
-  
-
-
-
+forms.alert("Updated {} text note(s).".format(fixed_count),
+            title="Fix Abbreviations")
