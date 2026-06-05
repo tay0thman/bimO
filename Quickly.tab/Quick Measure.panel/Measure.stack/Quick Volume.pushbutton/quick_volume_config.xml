@@ -1,9 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<QuickVolumeConfig>
-    <Projects>
-        <Project guid="default">
-            <SelectedUnit>Cubic Feet</SelectedUnit>
-            <PrecisionIndex>2</PrecisionIndex>
-        </Project>
-    <Project guid="7cacd49c-ac17-4591-ad0a-cbc9bb40015a-00012b83"><SelectedUnit>Cubic Centimeters</SelectedUnit><PrecisionIndex>3</PrecisionIndex></Project></Projects>
-</QuickVolumeConfig>

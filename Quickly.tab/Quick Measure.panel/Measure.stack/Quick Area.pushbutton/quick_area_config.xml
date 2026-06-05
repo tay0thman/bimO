@@ -1,9 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<QuickAreaConfig>
-    <Projects>
-        <Project guid="default">
-            <SelectedUnit>Square Feet</SelectedUnit>
-            <PrecisionIndex>2</PrecisionIndex>
-        </Project>
-    <Project guid="7cacd49c-ac17-4591-ad0a-cbc9bb40015a-00012b83"><SelectedUnit>Square Meters</SelectedUnit><PrecisionIndex>1</PrecisionIndex></Project></Projects>
-</QuickAreaConfig>

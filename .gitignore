@@ -1,0 +1,19 @@
+# Per-user / per-project state written by the Quick Measure tools.
+# Each user's preferred unit and precision per Revit project is stored here;
+# it's runtime state, not source code.
+**/quick_area_config.xml
+**/quick_length_config.xml
+**/quick_volume_config.xml
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor / OS junk
+.vscode/*.log
+*.swp
+*.bak
+*~
+Thumbs.db
+.DS_Store
