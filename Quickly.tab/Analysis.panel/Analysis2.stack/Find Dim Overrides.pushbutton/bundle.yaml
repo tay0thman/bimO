@@ -4,4 +4,3 @@ tooltip:
   en_us: |
     Detect dimensions whose Value Override text has been replaced by a manual string (e.g. "VERIFY", "+/-", a hand-typed dimension).
     Scope can be the active view or the entire project. Output lists every overridden dimension with its true value, override text, and a clickable element link.
-context: doc-required

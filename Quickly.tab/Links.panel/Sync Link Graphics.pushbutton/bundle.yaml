@@ -4,4 +4,3 @@ tooltip:
   en_us: |
     Copy a Revit link's graphic overrides from a source view template to multiple target view templates in one shot.
     Useful when you've dialed in a link's appearance in one template (e.g. interiors greyed out, structure halftone) and want to mirror that across every template that shows the link.
-context: doc-required

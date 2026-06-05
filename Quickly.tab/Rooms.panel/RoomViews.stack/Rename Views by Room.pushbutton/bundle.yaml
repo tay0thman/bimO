@@ -3,4 +3,3 @@ title:
 tooltip:
   en_us: |
     For each view you pick, find the closest room (by distance from the view's crop-box center to the room's location point) and replace any letter+3-digit pattern (e.g. "A101") in the view name with the room's number.
-context: doc-required

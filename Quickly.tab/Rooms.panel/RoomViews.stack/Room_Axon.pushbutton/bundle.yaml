@@ -4,4 +4,3 @@ tooltip:
   en_us: |
     Create an isometric 3D view for each selected room on the chosen level.
     Each new view is scoped via section box to the room's bounding box, set to 1/4"=1'-0" scale, Architectural discipline, and gets the chosen 3D view template applied. Existing views with the same name are replaced.
-context: doc-required

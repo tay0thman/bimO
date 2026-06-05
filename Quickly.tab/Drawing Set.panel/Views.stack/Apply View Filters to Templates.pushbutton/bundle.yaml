@@ -3,4 +3,3 @@ title:
 tooltip:
   en_us: |
     Apply a chosen view filter to multiple view templates in one shot, with a chosen color override on both cut and projection lines. Skips templates that already carry the filter.
-context: doc-required

@@ -2,4 +2,3 @@ title:
   en_us: Go To ACC
 tooltip:
   en_us: Open the current project's home page on Autodesk Construction Cloud (ACC) in the default web browser.
-context: doc-required

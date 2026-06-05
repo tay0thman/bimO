@@ -3,4 +3,3 @@ title:
 tooltip:
   en_us: |
     Find every view placed on a sheet whose name contains lowercase letters, let you tick which ones to fix, and uppercase them all in one transaction.
-context: doc-required

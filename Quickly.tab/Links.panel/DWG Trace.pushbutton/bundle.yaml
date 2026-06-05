@@ -4,4 +4,3 @@ tooltip:
   en_us: |
     Convert the geometry of a selected DWG/DXF import into native Revit detail elements — lines, arcs, ellipses, and curves get traced with a chosen line style; solid regions become filled regions of a chosen type.
     Optionally halftones the source CAD afterward so the new trace stands out.
-context: doc-required

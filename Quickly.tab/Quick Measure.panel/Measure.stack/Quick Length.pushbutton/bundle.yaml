@@ -3,4 +3,3 @@ title:
 tooltip:
   en_us: |
     Modeless live-updating length tool. Sum lengths of selected walls, model lines, detail lines, and line-based families — total updates as you change the selection. Pick imperial (fractional feet-inches, decimal feet-inches) or metric (m / cm / mm), precision, and category filters.
-context: doc-required

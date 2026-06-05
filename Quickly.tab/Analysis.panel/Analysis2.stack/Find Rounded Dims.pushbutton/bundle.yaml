@@ -4,4 +4,3 @@ tooltip:
   en_us: |
     Detect dimensions whose displayed value rounds away from the true measurement at a tolerance you choose (1/16" through 1/256").
     Output lists every flagged dimension with its display text, rounded reference value, and a clickable element link.
-context: doc-required

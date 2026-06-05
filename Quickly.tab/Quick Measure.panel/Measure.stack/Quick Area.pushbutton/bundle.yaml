@@ -3,4 +3,3 @@ title:
 tooltip:
   en_us: |
     Modeless live-updating area tool. Sum areas of selected rooms, floors, walls, ceilings, filled regions, sheets, etc. — total updates as you change the selection. Pick units (sq ft / sq m / …), precision, and category filters; copy the result, or click into the per-element breakdown.
-context: doc-required

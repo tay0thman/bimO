@@ -2,4 +2,3 @@ title:
   en_us: Find in ADC
 tooltip:
   en_us: Open the current project's folder on the local Autodesk Desktop Connector (ADC) mirror in File Explorer.
-context: doc-required

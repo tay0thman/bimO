@@ -4,4 +4,3 @@ tooltip:
   en_us: |
     Report the project's Internal Origin, Project Base Point, Survey Point, Shared Coordinates, and Angle to True North.
     Output uses the project's display units (e.g. feet–inches, degrees).
-context: doc-required

@@ -3,4 +3,3 @@ title:
 tooltip:
   en_us: |
     Find text notes containing dotted abbreviations like "U.O.N." or "M.E.P." and convert each to a no-intermediate-period form with a single trailing period — "UON.", "MEP.". Preview which notes to fix before committing.
-context: doc-required

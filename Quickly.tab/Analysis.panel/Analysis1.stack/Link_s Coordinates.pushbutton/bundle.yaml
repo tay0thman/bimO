@@ -4,4 +4,3 @@ tooltip:
   en_us: |
     For each selected Revit link, report its Internal Origin, Project Base Point, Survey Point, Shared Coordinates, and Angle to True North.
     Useful when verifying a link is aligned to the host project before sending models out.
-context: doc-required
