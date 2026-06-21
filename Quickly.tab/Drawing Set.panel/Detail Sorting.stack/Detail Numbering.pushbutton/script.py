@@ -2,17 +2,15 @@
 # Author: Tay Othman
 """Auto-number every viewport on the active sheet based on its position.
 
-The active view must be a sheet. Viewports are mapped to a 5-column × 4-row
-grid tuned to a 30"×42" landscape titleblock; cells are numbered 1..20
-left-to-right within each row, top-to-bottom.
+The active view must be a sheet. Viewports are grouped into rows (top-to-bottom)
+and numbered left-to-right within each row, derived from the viewports' actual
+positions on the sheet — so it works on any titleblock size, not just 30"x42".
 
 Two passes:
-1. Stamp every viewport with a unique "Xx<n>" placeholder so subsequent
-   real numbers don't collide with currently-assigned ones.
+1. Stamp every viewport with a unique "Xx<n>" placeholder so the final numbers
+   can never collide with a number currently in use on the sheet.
 2. Assign the position-based number to each viewport.
 """
-import random
-
 from pyrevit import revit, DB, forms, script
 
 __title__ = "Detail\nNumbering"
@@ -20,68 +18,101 @@ __author__ = "Tay Othman, AIA"
 __min_revit_ver__ = 2024
 __max_revit_ver__ = 2027
 
-# 5 columns × 4 rows, tuned for a 30"x42" landscape sheet.
-X_DOMAINS = [(2.5, 3.1), (1.91, 2.5), (1.32, 1.91), (0.731, 1.32), (0, 0.731)]
-Y_DOMAINS = [(1.85, 2.5), (1.25, 1.85), (0.656, 1.25), (0, 0.731)]
-
 doc = revit.doc
 active_view = revit.active_view
+output = script.get_output()
 
 if not isinstance(active_view, DB.ViewSheet):
-    forms.alert("Activate a sheet view first — this tool numbers viewports placed on the active sheet.",
-                title="Not a Sheet",
-                exitscript=True)
+    forms.alert("Activate a sheet view first — this tool numbers the viewports "
+                "placed on the active sheet.",
+                title="Not a Sheet", exitscript=True)
 
-viewports = list(DB.FilteredElementCollector(doc, active_view.Id).OfClass(DB.Viewport))
+viewports = list(DB.FilteredElementCollector(doc, active_view.Id)
+                 .OfClass(DB.Viewport))
 if not viewports:
     forms.alert("The active sheet has no viewports.",
-                title="No Viewports",
-                exitscript=True)
-
-cells = []  # ordered (left-to-right within each row, top-to-bottom)
-for x_lo, x_hi in X_DOMAINS:
-    for y_lo, y_hi in Y_DOMAINS:
-        cells.append(((x_lo, x_hi), (y_lo, y_hi)))
+                title="No Viewports", exitscript=True)
 
 
-def _cell_index_for(viewport):
-    center = viewport.GetBoxCenter()
-    lower_left = viewport.GetBoxOutline().MinimumPoint
-    mid = DB.XYZ((lower_left.X + center.X) / 2.0, (lower_left.Y + center.Y) / 2.0, 0)
-    quarter = DB.XYZ((lower_left.X + mid.X) / 2.0, (lower_left.Y + mid.Y) / 2.0, 0)
-    for k, ((x_lo, x_hi), (y_lo, y_hi)) in enumerate(cells):
-        if x_lo <= quarter.X <= x_hi and y_lo <= quarter.Y <= y_hi:
-            return k + 1
-    return None
+def detail_number_param(viewport):
+    """The settable 'Detail Number' lives on the Viewport, not the View it shows."""
+    return viewport.get_Parameter(DB.BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
 
 
-# Pass 1 — stamp every viewport with a unique placeholder to break duplicate-number conflicts.
+def view_name(viewport):
+    view = doc.GetElement(viewport.ViewId)
+    return view.Name if view else "<{}>".format(viewport.Id)
+
+
+# Build (viewport, center_x, center_y, height) for each viewport, in sheet feet.
+entries = []
+for vp in viewports:
+    outline = vp.GetBoxOutline()
+    lo, hi = outline.MinimumPoint, outline.MaximumPoint
+    entries.append((vp,
+                    (lo.X + hi.X) / 2.0,
+                    (lo.Y + hi.Y) / 2.0,
+                    abs(hi.Y - lo.Y)))
+
+# Row tolerance: half the typical viewport height (min 1"). Viewports whose
+# centers are vertically closer than this count as the same row.
+heights = sorted(e[3] for e in entries)
+median_h = heights[len(heights) // 2]
+row_tol = max(median_h * 0.5, 1.0 / 12.0)
+
+# Group into rows top-to-bottom; a vertical gap larger than row_tol starts a row.
+entries.sort(key=lambda e: -e[2])
+rows = []
+current = []
+prev_y = None
+for entry in entries:
+    if prev_y is not None and (prev_y - entry[2]) > row_tol:
+        rows.append(current)
+        current = []
+    current.append(entry)
+    prev_y = entry[2]
+if current:
+    rows.append(current)
+
+# Within each row, order left-to-right by center X.
+ordered = []
+for row in rows:
+    row.sort(key=lambda e: e[1])
+    ordered.extend(row)
+
+output.print_md("## Detail Numbering")
+output.print_md("Sheet **{}** — {}".format(active_view.SheetNumber, active_view.Name))
+
+# Pass 1 — unique placeholders so the final numbers can't collide with current ones.
 with revit.Transaction("Detail Numbering — placeholder pass"):
-    for viewport in viewports:
-        view = doc.GetElement(viewport.ViewId)
-        placeholder = "Xx{}".format(random.randint(1, 99999))
-        param = view.get_Parameter(DB.BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
+    for i, entry in enumerate(ordered, start=1):
+        param = detail_number_param(entry[0])
         if param and not param.IsReadOnly:
-            param.Set(placeholder)
+            param.Set("Xx{}".format(i))
 
-# Pass 2 — assign the final position-based number.
+# Pass 2 — assign the position-based number, per-item so one failure can't roll
+# back the whole batch (e.g. a read-only viewport that still holds a clashing number).
 numbered = 0
-unplaced = []
+skipped = []
 with revit.Transaction("Detail Numbering"):
-    for viewport in viewports:
-        view = doc.GetElement(viewport.ViewId)
-        index = _cell_index_for(viewport)
-        if index is None:
-            unplaced.append(view.Name)
+    for i, entry in enumerate(ordered, start=1):
+        vp = entry[0]
+        name = view_name(vp)
+        param = detail_number_param(vp)
+        if not param or param.IsReadOnly:
+            skipped.append("{} — Detail Number is read-only".format(name))
             continue
-        param = view.get_Parameter(DB.BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
-        if param and not param.IsReadOnly:
-            param.Set(str(index))
+        try:
+            param.Set(str(i))
             numbered += 1
-        print("{:>3} — {}".format(index, view.Name))
+            output.print_md("**{}** — {}".format(i, name))
+        except Exception as err:
+            skipped.append("{} — {}".format(name, err))
 
-forms.toast("Numbered {} viewport(s)".format(numbered), title="Detail Numbering")
-if unplaced:
-    print("\nViewports that fell outside the 5×4 grid (left as placeholder):")
-    for name in unplaced:
-        print("  - {}".format(name))
+output.print_md("---")
+output.print_md("Numbered **{}** of {} viewport(s) across {} row(s)."
+                .format(numbered, len(ordered), len(rows)))
+if skipped:
+    output.print_md("**Skipped {}:**".format(len(skipped)))
+    for line in skipped:
+        output.print_md("- {}".format(line))
