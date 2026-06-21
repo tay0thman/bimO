@@ -6,6 +6,8 @@ A dotted abbreviation is any whitespace-separated token longer than 3 chars
 that starts with an uppercase letter, has a period in position 2, and an
 uppercase letter in position 3 (so "U.O.N.", "M.E.P.", "T.B.D.") all match.
 """
+import re
+
 from pyrevit import revit, DB, forms, script
 
 __title__ = "Fix\nAbbreviations"
@@ -56,18 +58,25 @@ picked = forms.SelectFromList.show(
 if not picked:
     script.exit()
 
+def _fix_text(text):
+    """Convert dotted abbreviations in place, preserving every other character
+    (line breaks, tabs and repeated spaces are left exactly as authored)."""
+    def repl(match):
+        word = match.group(0)
+        if _is_dotted_abbreviation(word):
+            return word.replace(".", "") + "."
+        return word
+    return re.sub(r"\S+", repl, text)
+
+
 fixed_count = 0
 with revit.Transaction("Fix Abbreviations"):
     for note_id in picked:
         note = doc.GetElement(note_id)
-        words = (note.Text or "").split()
-        changed = False
-        for idx, word in enumerate(words):
-            if _is_dotted_abbreviation(word):
-                words[idx] = word.replace(".", "") + "."
-                changed = True
-        if changed:
-            note.Text = " ".join(words)
+        original = note.Text or ""
+        updated = _fix_text(original)
+        if updated != original:
+            note.Text = updated
             fixed_count += 1
 
 forms.alert("Updated {} text note(s).".format(fixed_count),
