@@ -395,7 +395,8 @@ def get_project_guid():
         pass
     try:
         if doc.PathName:
-            return str(hash(doc.PathName))
+            import hashlib
+            return hashlib.md5(doc.PathName.encode("utf-8")).hexdigest()
     except Exception:
         pass
     return "default"

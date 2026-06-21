@@ -11,7 +11,7 @@ __pycache__/
 *.pyo
 
 # Editor / OS junk
-.vscode/*.log
+**/.vscode/
 *.swp
 *.bak
 *~
